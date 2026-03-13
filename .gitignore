@@ -18,6 +18,7 @@ venv/
 # Frontend
 frontend_portal/node_modules/
 frontend_portal/dist/
+node_modules/
 
 # OS
 .DS_Store
