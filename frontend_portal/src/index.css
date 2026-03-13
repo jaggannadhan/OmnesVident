@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-base text-slate-100;
+    scrollbar-color: #2a2a50 #06060f;
+    scrollbar-width: thin;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-base;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-rim;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-rim-bright;
+  }
+}
+
+@layer utilities {
+  .text-category-world        { @apply text-sky-400; }
+  .text-category-politics     { @apply text-red-400; }
+  .text-category-technology   { @apply text-cyan-400; }
+  .text-category-business     { @apply text-green-400; }
+  .text-category-science      { @apply text-violet-400; }
+  .text-category-health       { @apply text-emerald-400; }
+  .text-category-entertainment { @apply text-pink-400; }
+  .text-category-sports       { @apply text-orange-400; }
+
+  .bg-category-world          { @apply bg-sky-400/10 ring-sky-400/30; }
+  .bg-category-politics       { @apply bg-red-400/10 ring-red-400/30; }
+  .bg-category-technology     { @apply bg-cyan-400/10 ring-cyan-400/30; }
+  .bg-category-business       { @apply bg-green-400/10 ring-green-400/30; }
+  .bg-category-science        { @apply bg-violet-400/10 ring-violet-400/30; }
+  .bg-category-health         { @apply bg-emerald-400/10 ring-emerald-400/30; }
+  .bg-category-entertainment  { @apply bg-pink-400/10 ring-pink-400/30; }
+  .bg-category-sports         { @apply bg-orange-400/10 ring-orange-400/30; }
+}

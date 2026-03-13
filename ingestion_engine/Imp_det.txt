@@ -1,0 +1,120 @@
+================================================================================
+  MODULE 1 — INGESTION ENGINE: IMPLEMENTATION DETAILS
+  Date: 2026-03-12
+================================================================================
+
+SUCCESSES
+---------
+1. Directory structure
+   All specified directories and files created:
+   ingestion_engine/{providers,core,tests}/__init__.py, base.py,
+   newsdata_io.py, rss_provider.py, models.py, normalizer.py, manager.py,
+   main.py, Imp_det.txt.
+
+2. NewsEvent schema (core/models.py)
+   - Pydantic v2 BaseModel with all six required fields: title (str),
+     snippet (str), source_url (str), source_name (str), region_code (str),
+     timestamp (datetime, UTC).
+   - Custom @field_serializer for timestamp produces clean ISO-8601 strings
+     in JSON output (Pydantic v2 idiomatic — no deprecation warnings).
+
+3. Normalization logic (core/normalizer.py)
+   - clean_and_truncate(text):
+     * Strips <script>, <style>, then all remaining HTML tags via regex.
+     * Collapses whitespace.
+     * Searches for 1st/2nd natural sentence boundary (. ! ? followed by
+       whitespace) within a 200-char window.
+     * Falls back to hard truncation at 157 chars + "..." when no boundary
+       found inside the 160-char limit.
+   - strip_html(text): standalone helper for title-level cleaning with no
+     truncation.
+
+4. BaseProvider ABC (providers/base.py)
+   - Abstract base with async fetch() -> List[NewsEvent] and abstract
+     name property. Enforces contract for all provider subclasses.
+
+5. NewsDataProvider (providers/newsdata_io.py)
+   - Reads NEWSDATA_API_KEY from environment (falls back to "MOCK_API_KEY").
+   - Accepts country (ISO alpha-2), language, and page_size parameters.
+   - Performs async GET via httpx with 15s timeout.
+   - Handles HTTP errors and network errors with per-provider logging;
+     returns empty list on failure to isolate blast radius.
+   - Mock data path returns two synthetic NewsEvent objects when no real
+     API key is present, enabling local development/testing without a key.
+
+6. RSSProvider (providers/rss_provider.py)
+   - Accepts a list of feed URLs and a region_code.
+   - Runs feedparser (synchronous) inside asyncio thread-pool executor to
+     avoid blocking the event loop.
+   - Parses published_parsed (struct_time), published (RFC 2822 string),
+     or falls back to UTC now for timestamps.
+   - Handles malformed feeds per-URL; logs errors and continues.
+
+7. IngestionManager (core/manager.py)
+   - asyncio.gather() across all registered providers for true concurrent
+     fetching.
+   - _safe_fetch() wrapper isolates exceptions at the provider level — one
+     broken provider cannot cancel other in-flight fetches.
+   - Logs provider-level event counts and total collected events.
+
+8. main.py execution loop
+   - Configures NewsDataProvider for 5 countries (US, GB, DE, JP, BR) and
+     two RSS feed groups (BBC World/Tech → GB, NYT World → US).
+   - Prints a summary count and JSON preview of the first 5 events.
+   - Runnable via: python -m ingestion_engine.main
+
+9. Test suite (14 tests, 0 failures, 0 warnings)
+   - test_normalizer.py: 8 tests covering HTML stripping, sentence boundary
+     detection, hard truncation, edge cases (exact 160-char input).
+   - test_models.py: 3 tests covering creation, required-field validation,
+     JSON serialization.
+   - test_manager.py: 3 async tests covering multi-provider aggregation,
+     broken-provider isolation, and empty-provider edge case.
+
+
+FAILURES / BLOCKERS
+-------------------
+1. Live newsdata.io API calls not tested
+   No real API key was available during build. The NewsDataProvider mock
+   path covers the code path, but _parse() is only exercised against
+   live API responses. Integration tests require a paid/free-tier key.
+
+2. RSS feeds not fetched during CI
+   feedparser makes live HTTP calls. Tests stub providers entirely rather
+   than hitting real feeds, so network-dependent parsing (e.g., encoding
+   edge cases in specific feeds) is untested at this stage.
+
+3. Deduplication not yet implemented
+   Multiple providers may return the same story (e.g., BBC RSS and a
+   newsdata.io result for GB both covering the same headline). This is
+   deferred to a future module (story clustering / de-duplication engine).
+
+
+TECHNICAL DEBT
+--------------
+1. No pagination support in NewsDataProvider
+   newsdata.io supports a nextPage cursor. The current implementation
+   fetches only page 1 (up to `size` results). Pagination should be added
+   when higher volume is needed.
+
+2. RSSProvider uses run_in_executor with default thread pool
+   feedparser can be slow on large feeds. Consider bounding the executor
+   or replacing with an async HTTP + xml.etree parse path for better
+   back-pressure control.
+
+3. region_code is caller-assigned, not inferred
+   NewsDataProvider uses the requested country code; RSSProvider requires
+   explicit region_code. A future module should auto-detect region from
+   feed metadata or article geolocation signals.
+
+4. No retry / back-off logic
+   Transient network failures result in an empty list for that provider
+   with no retry. A tenacity-based retry decorator should be added before
+   production deployment.
+
+5. snippet length is enforced at normalizer level, not Pydantic validator
+   The 160-char contract is guaranteed only if callers use clean_and_truncate.
+   A Pydantic field_validator on NewsEvent.snippet would make this
+   invariant enforceable at the schema boundary regardless of caller.
+
+================================================================================

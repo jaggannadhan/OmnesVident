@@ -1,0 +1,20 @@
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { fetchNews, type FetchNewsParams, type PaginatedStoriesResponse } from "../services/api";
+
+/**
+ * React Query hook for paginated, filtered news stories.
+ *
+ * - staleTime / refetchInterval are set globally in QueryClient (5 minutes).
+ * - keepPreviousData prevents layout flicker during page/filter transitions.
+ * - queryKey includes all filter params so each unique combination is cached
+ *   independently.
+ */
+export function useNews(params: FetchNewsParams = {}) {
+  const { region, category, limit = 50, offset = 0 } = params;
+
+  return useQuery<PaginatedStoriesResponse>({
+    queryKey: ["news", region ?? "global", category ?? "all", limit, offset],
+    queryFn: () => fetchNews({ region, category, limit, offset }),
+    placeholderData: keepPreviousData,
+  });
+}

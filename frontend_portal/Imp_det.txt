@@ -1,0 +1,161 @@
+================================================================================
+  MODULE 4 — FRONTEND DISCOVERY PORTAL: IMPLEMENTATION DETAILS
+  Date: 2026-03-13
+================================================================================
+
+SUCCESSES
+---------
+1. Project scaffold — Vite 5 + React 18 + TypeScript (strict mode)
+   Hand-scaffolded (no create-vite template) for precise control.
+   Zero TypeScript errors on tsc --noEmit; production build completes in
+   ~900ms producing 220 KB JS / 18 KB CSS (69.5 KB / 4.2 KB gzipped).
+
+2. Tailwind CSS — "Command Center" dark aesthetic
+   tailwind.config.js extends the palette with custom tokens:
+     base (#06060f), surface (#0d0d1a), panel (#121228), card (#181832)
+     rim / rim-bright — subtle border hierarchy
+   Custom utility classes (.text-category-*, .bg-category-*) map each of
+   the 8 canonical categories to a distinct accent color, applied
+   consistently across NewsCard badges and Sidebar buttons.
+   Thin styled scrollbars, fade-in keyframe animation, slow-pulse indicator.
+
+3. api.ts (services/api.ts)
+   Thin fetch wrapper with two exports:
+     fetchNews({ region, category, limit, offset }) — builds the correct
+       path (/news or /news/{region_code}) and query string automatically.
+     fetchHealth() — ping endpoint for status checks.
+   Base URL is VITE_API_BASE_URL env var, defaulting to /api (proxied by
+   Vite to http://localhost:8000 in development).
+   Throws a typed Error on non-2xx responses for React Query to catch.
+
+4. useNews.ts (hooks/useNews.ts)
+   TanStack Query v5 hook:
+     - staleTime: 5 minutes (set globally in QueryClient).
+     - refetchInterval: 5 minutes (set globally) — "Live · 5m" indicator
+       in the header reflects this cadence.
+     - keepPreviousData (placeholderData) prevents layout flicker during
+       page/filter transitions.
+     - queryKey includes all params so every unique filter combination is
+       independently cached and revalidated.
+
+5. NewsCard.tsx
+   "Fair Use" compliant by design:
+     - Source name (source_name) displayed as the primary label above the
+       headline, styled more prominently than the snippet.
+     - Title is a direct <a href={source_url} target="_blank" rel="noopener
+       noreferrer"> link — opens the original publisher's page.
+     - External link icon (inline SVG, no dep) on every outbound link.
+     - No iframes or embedded content.
+   Secondary sources dropdown:
+     - Rendered only when secondary_sources.length > 0.
+     - Animated ChevronDown toggle, aria-expanded attribute.
+     - Shows hostname (stripped of www.) for each duplicate URL.
+   Category + region badges are interactive — clicking them updates the
+   active filter state without a full page reload.
+   formatRelativeTime() converts ISO timestamps to "5m ago" / "3h ago"
+   strings for scannability.
+
+6. NewsGrid.tsx
+   3-column responsive grid (1 col mobile → 2 col sm → 3 col xl).
+   Three states handled:
+     - Loading: 24 animated skeleton cards (pulse), matching grid layout.
+     - Error: centered error panel with the API error message.
+     - Empty: informative empty state with active filters shown.
+   "Refreshing…" sub-indicator (isFetching and !isLoading) shows when a
+   background refetch is in progress without hiding existing content.
+   Pagination component: Prev / Next buttons with current page and total
+   count; hidden when total fits on one page.
+
+7. Sidebar.tsx
+   Structured in three sections:
+     - Category filter: 8 buttons with emoji icon, label, and per-category
+       active color. Toggling the active category deselects it.
+     - Region filter: Global button + 4 continent groups (Americas, Europe,
+       Asia-Pacific, Middle East & Africa) with ISO code + country name.
+     - Fair use footer: plain-text attribution statement.
+   Active filter summary card shows current region + category chips and
+   a "Clear all" button when any filter is active.
+
+8. WorldMap.tsx — Region Heat Grid
+   Geographic tile grid (12 cols × 6 rows) positioning 20 region tiles
+   approximately where those countries appear on a real map.
+   CSS Grid with fixed gridTemplateColumns / gridTemplateRows — no library
+   dependency.  Each tile: ISO code, hover/active states, ARIA attributes.
+   Active tile: cyan glow (box-shadow + ring) for visual clarity.
+   Visible on md+ screens; hidden on mobile (Sidebar region list takes over).
+
+9. App.tsx — Routing & state management
+   React Router v6 routes:
+     /              → global feed (no region filter)
+     /region/:regionCode → filtered by region (e.g. /region/US)
+     * → redirect to /
+   All filter state is co-located in FeedView:
+     - Region: encoded in the URL path (shareable, bookmarkable).
+     - Category: useState (intentionally ephemeral; not in URL to avoid
+       overly complex query-string management for MVP).
+     - Offset: reset to 0 on any filter change.
+   Mobile sidebar: overlay with blur backdrop, slide-in transform, closes
+   on backdrop click or region selection.
+   Top bar: breadcrumb (Feed / US / TECHNOLOGY), live cadence indicator.
+
+10. Build output (production)
+    dist/assets/index-*.js    220 KB raw / 69.5 KB gzip
+    dist/assets/index-*.css    18 KB raw /  4.2 KB gzip
+    95 modules transformed in 898ms.
+
+
+FAILURES / BLOCKERS
+-------------------
+1. WorldMap is a tile grid, not a real SVG choropleth map
+   A proper clickable SVG world map requires either a large TopoJSON asset
+   or a library (react-simple-maps, d3-geo).  The tile grid satisfies the
+   regional selector intent at zero bundle cost but is not geographically
+   precise for small or oddly-shaped countries.
+
+2. No authentication or user sessions
+   All filters are URL-only; there is no user account, saved feed, or
+   personalisation layer.
+
+3. Category state is not in the URL
+   Category is ephemeral useState — navigating away or refreshing loses it.
+   A future improvement: encode category as a ?category= query param.
+
+4. No WebSocket / Server-Sent Events
+   The 5-minute polling interval is a practical approximation of real-time.
+   True low-latency updates would require SSE from the FastAPI backend.
+
+5. Moderately large JS bundle
+   220 KB uncompressed is reasonable but includes the full TanStack Query
+   runtime.  Code-splitting per route would reduce initial load if more
+   routes are added.
+
+
+TECHNICAL DEBT
+--------------
+1. Category filter not persisted in URL
+   Should use URLSearchParams alongside the region path param so feeds are
+   fully shareable.  Requires coordinating with React Router's useSearchParams.
+
+2. WorldMap tile positions are hardcoded
+   Adding or repositioning regions requires editing the TILES array.
+   A data-driven config (JSON) would be more maintainable.
+
+3. No loading indicator in the header during initial mount
+   isFetching is shown inline in the grid but there is no top-bar progress
+   bar (like NProgress) for a smoother perceived load experience.
+
+4. Accessibility: focus management on mobile sidebar
+   The mobile overlay sidebar does not trap focus, which means keyboard
+   users can tab behind it.  A focus-trap utility should be added.
+
+5. No error boundary
+   A React ErrorBoundary wrapping the NewsGrid is missing — an unhandled
+   render error would crash the entire app rather than showing a graceful
+   fallback.
+
+6. Vite proxy is dev-only
+   Production deployment requires configuring the web server (nginx/Caddy)
+   to proxy /api/* to the FastAPI backend, or setting VITE_API_BASE_URL to
+   the full backend URL at build time.
+
+================================================================================
