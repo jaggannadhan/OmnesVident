@@ -6,11 +6,21 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Proxy /api/* to the FastAPI backend during development
       "/api": {
         target: "http://localhost:8000",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
+      },
+    },
+  },
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "three-vendor": ["three"],
+          "r3f-vendor":   ["@react-three/fiber", "@react-three/drei"],
+        },
       },
     },
   },

@@ -1,8 +1,14 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, lazy, Suspense } from "react";
 import { useNavigate, useParams, Routes, Route, Navigate } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { NewsGrid } from "./components/NewsGrid";
 import { WorldMap } from "./components/WorldMap";
+import { GlobeErrorBoundary } from "./components/visualizer/GlobeErrorBoundary";
+
+// Lazy-load the heavy R3F bundle so it doesn't block the initial paint
+const GlobeScene = lazy(() =>
+  import("./components/visualizer/GlobeScene").then((m) => ({ default: m.GlobeScene }))
+);
 
 // ---------------------------------------------------------------------------
 // Mobile menu icon
@@ -31,6 +37,7 @@ function FeedView() {
   const [category, setCategory] = useState<string | undefined>();
   const [offset, setOffset] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [globeOpen, setGlobeOpen] = useState(true);
 
   const handleRegionSelect = useCallback(
     (region: string | undefined) => {
@@ -118,10 +125,23 @@ function FeedView() {
             )}
           </div>
 
-          {/* Live indicator */}
-          <div className="ml-auto flex items-center gap-1.5 text-[10px] text-slate-600 font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse_slow" aria-hidden="true" />
-            LIVE · 5m
+          {/* View toggle + live indicator */}
+          <div className="ml-auto flex items-center gap-3">
+            <button
+              onClick={() => setGlobeOpen((p) => !p)}
+              className={`hidden md:inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-md border transition-colors ${
+                globeOpen
+                  ? "border-cyan-500/40 text-cyan-400 bg-cyan-400/10"
+                  : "border-rim text-slate-500 hover:text-slate-300 hover:border-rim-bright"
+              }`}
+              title={globeOpen ? "Hide globe" : "Show globe"}
+            >
+              🌐 {globeOpen ? "Globe on" : "Globe off"}
+            </button>
+            <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse_slow" aria-hidden="true" />
+              LIVE · 5m
+            </div>
           </div>
         </header>
 
@@ -129,8 +149,25 @@ function FeedView() {
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
           <div className="max-w-7xl mx-auto flex flex-col gap-5">
 
-            {/* World map — hidden on small screens */}
-            <div className="hidden md:block">
+            {/* 3D Globe — hidden on small screens, toggleable */}
+            {globeOpen && (
+              <div className="hidden md:block">
+                <GlobeErrorBoundary>
+                  <Suspense
+                    fallback={
+                      <div className="w-full rounded-xl border border-rim bg-base flex items-center justify-center text-slate-600 text-xs font-mono" style={{ height: 480 }}>
+                        Loading 3D engine…
+                      </div>
+                    }
+                  >
+                    <GlobeScene region={regionCode} />
+                  </Suspense>
+                </GlobeErrorBoundary>
+              </div>
+            )}
+
+            {/* Fallback tile map (mobile only) */}
+            <div className="md:hidden">
               <WorldMap
                 selectedRegion={regionCode}
                 onRegionSelect={handleRegionSelect}

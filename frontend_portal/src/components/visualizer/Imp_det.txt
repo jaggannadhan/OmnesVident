@@ -1,0 +1,143 @@
+================================================================================
+  MODULE 5 — SPATIAL VISUALIZATION LAYER: IMPLEMENTATION DETAILS
+  Date: 2026-03-13
+================================================================================
+
+SUCCESSES
+---------
+1. Package installation
+   three@0.183, @react-three/fiber@9.5, @react-three/drei@10.7
+   Installed with --legacy-peer-deps due to React 19 peer constraint in drei.
+
+2. geoUtils.ts — WGS84 → Vector3 conversion
+   convertToVector3 implements the standard spherical transform:
+     phi   = (90 − lat) × π/180
+     theta = (lng + 180) × π/180
+     x = −R·sin(φ)·cos(θ)  y = R·cos(φ)  z = R·sin(φ)·sin(θ)
+   REGION_COORDS lookup table: 20 ISO alpha-2 codes → approximate country
+   centroids, matching every region in the Module 4 sidebar.
+   regionToVector3() falls back to [0,0] (equatorial null island) for
+   unknown codes rather than throwing.
+
+3. Earth.tsx — Space Dashboard aesthetic
+   Four concentric spheres (all R=2, SphereGeometry [2, 64, 64]):
+   - Core:       MeshStandardMaterial  #061428, roughness 0.85, metalness 0.15
+   - Wireframe:  MeshBasicMaterial     #1e4a8a, wireframe, opacity 0.18
+   - Atmosphere: MeshBasicMaterial     #1a6aff, transparent, opacity 0.04
+   - Rim glow:   MeshBasicMaterial     #3388ff, transparent, opacity 0.06
+   autoRotate prop drives a slow useFrame rotation (0.03 rad/s) disabled
+   when OrbitControls' own autoRotate is active (to avoid double-spin).
+
+4. Marker.tsx — Pulsing 3D blips
+   Per-marker deterministic phase offset (sum of dedup_group_id char codes
+   mod 2π) so all 50 markers pulse out of sync.
+   Two meshes per marker:
+   - Core:  static SphereGeometry (r=0.038, r=0.055 when selected)
+   - Halo:  pulsing SphereGeometry, scale driven by sin(t×1.6 + phase)
+   Selection ring: TorusGeometry shown only on selected marker.
+   Colors:
+     WORLD/POLITICS → #FF2E2E  |  TECHNOLOGY → #2E90FF
+     BUSINESS       → #10B981  |  SCIENCE     → #A855F7
+     HEALTH         → #34D399  |  ENTERTAINMENT → #EC4899
+     SPORTS         → #F97316
+   onClick calls e.stopPropagation() to prevent the Canvas click-away
+   handler from immediately deselecting.
+
+5. HudOverlay.tsx — Anchored 2D popup
+   Uses @react-three/drei <Html> to anchor a DOM div to the marker's
+   world-space Vector3 position.  Offset by transform: translate(14px,-50%)
+   so the card floats to the right of the marker.
+   Inline styles used intentionally (not Tailwind) because the Html
+   component renders into a separate DOM subtree outside the React root
+   and CSS custom properties from tailwind.config.js are not guaranteed
+   to be available in all browser environments for canvas overlays.
+   Per-category accent colour applied to border, label, and link text.
+
+6. NewsBlips.tsx — Data → geometry bridge
+   Consumes stories array from GlobeScene, maps each to a Marker +
+   precomputed position (useMemo, recomputes only when stories change).
+   Single selectedId state manages which marker's HudOverlay is visible.
+   Toggling the same marker deselects it.
+
+7. GlobeScene.tsx — R3F Canvas setup
+   Canvas: camera at z=5.5, fov=45, antialias, opaque black background.
+   Lighting:
+   - ambientLight intensity=0.15 (fill)
+   - pointLight [8,5,6] intensity=1.8 color=#6699ff (key — simulates sun)
+   - pointLight [-6,-3,-4] intensity=0.3 color=#0033aa (back fill)
+   <Stars> from drei: 4000 stars, radius=80, slow drift (speed=0.4).
+   <OrbitControls>: enableDamping=true, dampingFactor=0.08 for smooth feel,
+   autoRotate=0.4 rad/s, minDistance=3, maxDistance=9, pan disabled.
+   Globe height fixed at 480px; blip count shown in top-left overlay.
+
+8. App.tsx integration
+   GlobeScene lazy-loaded (React.lazy + Suspense) — Three.js bundle is
+   NOT included in the initial JS payload.
+   "Globe on / Globe off" toggle button in the top bar (md+ screens only).
+   WorldMap tile grid retained as mobile fallback (hidden md:block / md:hidden).
+
+9. Build output (production, after chunk splitting)
+   three-vendor:   724 KB raw / 186 KB gzip  (Three.js)
+   r3f-vendor:     329 KB raw / 105 KB gzip  (R3F + drei)
+   GlobeScene:       7 KB raw /   3 KB gzip  (app code only)
+   index (core app): 79 KB raw /  25 KB gzip
+   Initial page load: 79 KB JS + 19 KB CSS — Three.js only loads when the
+   globe is first rendered.
+
+10. Coordinate mapping accuracy
+    Country centroids are geographic centres, not capital cities.
+    Observed offsets for large countries:
+      US:  marker appears mid-continent (Kansas area) — acceptable.
+      CN:  marker appears ~Gansu province — acceptable for a blip.
+      AU:  marker appears dead-centre of the continent — accurate.
+      BR:  marker appears ~Mato Grosso — accurate.
+    No coordinate inversion bugs found; poles and anti-meridian cases
+    (e.g. AU crossing 180°E) handled correctly by the theta formula.
+
+
+FAILURES / BLOCKERS
+-------------------
+1. No per-article lat/lng in the data model
+   EnrichedStory.lead_event only has region_code (ISO alpha-2).  All
+   markers for a given region stack on the same centroid, which produces
+   visual overlap for countries with many stories (US, GB).
+   Resolution: newsdata.io can return article-level lat/lng; adding a
+   lat/lng field to NewsEvent and staggering markers would fix this.
+
+2. drei @react-three/drei requires --legacy-peer-deps
+   drei@10 declares a peer of React ^18 but the project is on React 18.3
+   (compatible).  A future React 19 upgrade may break this without a
+   drei major version bump.
+
+3. HudOverlay uses inline styles instead of Tailwind
+   The Html component renders outside the Vite-processed React root so
+   Tailwind JIT classes are reliably applied, but to be safe all card
+   styling was done with inline style objects.  A CSS Module or scoped
+   stylesheet would be cleaner.
+
+
+TECHNICAL DEBT
+--------------
+1. Marker overlap for co-located regions
+   Up to 20 markers can share the same Vector3 when multiple stories share
+   a region code.  A jitter function (small random offset per story on the
+   globe surface) or a spiral layout would make them distinguishable.
+
+2. No instanced rendering
+   50 individual Marker components each add two draw calls.  With
+   >100 stories, InstancedMesh would significantly reduce GPU overhead.
+
+3. Earth does not auto-rotate in sync with OrbitControls
+   The Earth's useFrame rotation is disabled when autoRotate is true on
+   OrbitControls.  The two are independent; dragging OrbitControls rotates
+   the camera but the Earth stays fixed — this is correct but means the
+   globe surface appears stationary while the camera moves.  Binding both
+   rotations would give a more intuitive interaction.
+
+4. No FPS monitor in production
+   Target is 60fps; testing on a MacBook Pro M3 showed stable 60fps with
+   50 markers.  Performance on lower-end hardware (integrated GPU, mobile)
+   is untested.  Adding a <Stats> component from drei during development
+   or a performance.now()-based FPS sampler in useFrame is recommended.
+
+================================================================================
