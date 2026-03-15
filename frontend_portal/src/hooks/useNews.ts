@@ -10,11 +10,11 @@ import { fetchNews, type FetchNewsParams, type PaginatedStoriesResponse } from "
  *   independently.
  */
 export function useNews(params: FetchNewsParams = {}) {
-  const { region, category, limit = 50, offset = 0 } = params;
+  const { region, category, limit = 50, offset = 0, start_date, end_date } = params;
 
   return useQuery<PaginatedStoriesResponse>({
-    queryKey: ["news", region ?? "global", category ?? "all", limit, offset],
-    queryFn: () => fetchNews({ region, category, limit, offset }),
+    queryKey: ["news", region ?? "global", category ?? "all", limit, offset, start_date ?? "", end_date ?? ""],
+    queryFn: () => fetchNews({ region, category, limit, offset, start_date, end_date }),
     placeholderData: keepPreviousData,
   });
 }

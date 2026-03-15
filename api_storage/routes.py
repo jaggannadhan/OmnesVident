@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session
 
 from api_storage.database import create_db_and_tables, get_db_session
@@ -62,6 +63,24 @@ app = FastAPI(
     description="Real-time global news discovery — storage and retrieval layer.",
     version="0.3.0",
     lifespan=lifespan,
+)
+
+# ---------------------------------------------------------------------------
+# CORS — allow the Vercel frontend (and localhost dev) to call the API.
+# CORS_ORIGINS env var overrides defaults; separate multiple origins with ","
+# ---------------------------------------------------------------------------
+_raw_origins = os.getenv(
+    "CORS_ORIGINS",
+    "https://omnes-vident.vercel.app,http://localhost:5173,http://localhost:3000",
+)
+_cors_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_origin_regex=r"https://omnes-vident.*\.vercel\.app",
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

@@ -234,3 +234,94 @@ KNOWN GAPS / FUTURE WORK
    until midnight UTC reset.
 
 ================================================================================
+
+================================================================================
+MODULE 14.0 — FRONTEND DEPLOYMENT (VERCEL)
+Updated: 2026-03-15
+================================================================================
+
+OBJECTIVE
+---------
+Deploy the interactive 3D frontend to Vercel and connect it to the production
+Cloud Run backend and Firestore database.
+
+FRONTEND STACK
+--------------
+- Framework:  React 18.3.1 + Vite 5.3.4 (SPA, not Next.js)
+- 3D/Globe:   React Three Fiber 8.18.0, Three.js 0.163.0, @react-three/drei
+- State/Data: @tanstack/react-query 5.45.1
+- Routing:    react-router-dom 6.24.0
+- Styling:    Tailwind CSS 3.4.6
+- Build out:  frontend_portal/dist/ (vite build)
+
+IMPLEMENTATION STATUS: COMPLETE (pending Vercel project creation)
+-----------------------------------------------------------------
+
+1. Backend CORS (api_storage/routes.py)
+   Added CORSMiddleware after app creation:
+   - allow_origins: omnes-vident.vercel.app, localhost:5173, localhost:3000
+     (overridable via CORS_ORIGINS env var, comma-separated)
+   - allow_origin_regex: https://omnes-vident.*\.vercel\.app
+     (covers preview deployments)
+   - allow_methods: ["*"]
+   - allow_headers: ["*"]
+   Verified: OPTIONS preflight to /news with Origin: https://omnes-vident.vercel.app
+   returns access-control-allow-origin: https://omnes-vident.vercel.app (200 OK)
+   Cloud Run revision: omnesvident-api-00010-q2r
+
+2. Environment configuration (frontend_portal/.env.production)
+   VITE_API_BASE_URL=https://omnesvident-api-naqkmfs2qa-uc.a.run.app
+   - Vite inlines this at build time (import.meta.env.VITE_API_BASE_URL)
+   - In dev: falls back to "/api" proxied by vite.config.ts to localhost:8000
+   - Note: A&D spec used NEXT_PUBLIC_ prefix; project uses Vite so VITE_ prefix
+
+3. Vercel deployment config (vercel.json — project root)
+   - buildCommand:    cd frontend_portal && npm install && npm run build
+   - outputDirectory: frontend_portal/dist
+   - rewrites:        /* -> /index.html  (SPA fallback routing)
+   - headers:         Security headers (X-Frame-Options, CSP) on all routes
+                      Cache-Control: immutable on /assets/* (hashed filenames)
+
+4. Time-Travel filter (frontend_portal/src/services/api.ts)
+   Added start_date and end_date to FetchNewsParams interface.
+   fetchNews() passes them as ISO 8601 query params when provided.
+   useNews hook passes them through and includes them in queryKey.
+   Backend already supported start_date/end_date on both /news and
+   /news/{region_code} — no backend change needed.
+   Example URL produced:
+     GET /news?region=IN&start_date=2026-03-07&end_date=2026-03-14
+
+5. Vercel deployment steps (CLI)
+   From project root (after login: vercel login):
+     vercel --prod
+   Or link existing project:
+     vercel link
+     vercel env add VITE_API_BASE_URL production
+     vercel --prod
+
+   Vercel auto-detects Vite from package.json; vercel.json overrides are
+   applied on top.
+
+VALIDATION CHECKLIST
+--------------------
+- [ ] Vercel project created (omnes-vident or similar)
+- [ ] Production build passes locally:
+        cd frontend_portal && npm run build
+- [ ] CORS OPTIONS preflight: ✓ (verified, see §1 above)
+- [ ] 3D globe renders news blips from Cloud Run /news endpoint
+- [ ] Network tab shows XHR to omnesvident-api-naqkmfs2qa-uc.a.run.app/news
+- [ ] 15-minute heartbeat brings new blips to globe without page reload
+
+KNOWN GAPS / FUTURE WORK
+-------------------------
+1. Time-Travel slider UI not yet built — api.ts/useNews.ts now accept
+   start_date/end_date; a date-range picker component is the missing piece.
+2. SQLite ephemerality: Cloud Run container restart resets the SQLite DB
+   (and with it, the stories returned by GET /news). Long-term fix: serve
+   GET /news directly from Firestore master_news.
+3. CORS_ORIGINS env var should be added to Cloud Run secrets/env to easily
+   add preview-branch Vercel URLs without a redeploy.
+4. Vercel preview deployments get a unique URL per branch; the regex
+   allow_origin_regex covers omnes-vident-*.vercel.app patterns.
+
+================================================================================

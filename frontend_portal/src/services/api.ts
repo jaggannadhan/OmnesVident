@@ -35,6 +35,10 @@ export interface FetchNewsParams {
   category?: string;
   limit?: number;
   offset?: number;
+  /** ISO 8601 date string — return stories on or after this date */
+  start_date?: string;
+  /** ISO 8601 date string — return stories on or before this date */
+  end_date?: string;
 }
 
 async function apiFetch<T>(path: string): Promise<T> {
@@ -52,12 +56,16 @@ export function fetchNews({
   category,
   limit = 50,
   offset = 0,
+  start_date,
+  end_date,
 }: FetchNewsParams = {}): Promise<PaginatedStoriesResponse> {
   const params = new URLSearchParams();
   // "WORLD" is the catch-all view — omit the filter so all stories are returned
   if (category && category !== "WORLD") params.set("category", category);
   params.set("limit", String(limit));
   params.set("offset", String(offset));
+  if (start_date) params.set("start_date", start_date);
+  if (end_date) params.set("end_date", end_date);
 
   const qs = params.toString();
   const base = region ? `/news/${encodeURIComponent(region)}` : "/news";
