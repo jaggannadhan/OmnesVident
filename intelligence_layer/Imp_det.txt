@@ -327,6 +327,109 @@ KNOWN GAPS / FUTURE WORK
 ================================================================================
 
 ================================================================================
+MODULE 16.1 — AI GEO-LOCATION REFINEMENT AGENT (CANONICAL)
+Updated: 2026-03-15
+================================================================================
+
+OBJECTIVE
+---------
+Formalise the AI geo-refiner as a production-grade module with an explicit
+GeocodingCache class and canonical file path (intelligence_layer/refiner.py).
+Supersedes Module 16.0's proof-of-concept implementation in ai_geo_refiner.py.
+
+IMPLEMENTATION STATUS: COMPLETE
+---------------------------------
+
+1. intelligence_layer/refiner.py  (new canonical file)
+
+   class GeocodingCache
+   ─────────────────────
+   Firestore-backed city-coordinate cache.  Reduces LLM calls for
+   frequently-seen cities (Chennai, Mumbai, Coimbatore …).
+
+   Collection: geo_lexicon
+   Document ID: city name, lowercase-stripped ("coimbatore", "austin")
+   Fields:  region_code, lat, lng, confidence, _city, cached_at
+
+   Methods:
+     get(city) → Optional[dict]   — Firestore read; returns None on miss/error
+     set(city, data) → None       — Firestore write; silently swallows errors
+
+   class AIRefiner
+   ─────────────────
+   Main agent.  Singleton instance: `ai_refiner`.
+
+   process_buffer(limit=100) → int
+     1. Fetch pending docs from raw_ingestion_buffer.
+     2. Batch through Gemini 1.5 Flash (15 stories/call) for geo resolution.
+     3. For each story: check GeocodingCache → populate cache on miss.
+     4. Apply keyword classifier for category assignment.
+     5. Upsert into master_news via promote_to_master() with extra_fields:
+          latitude, longitude, geo_confidence, geo_source, category
+     6. Batch-mark buffer docs as status="processed".
+     Returns: count of promoted docs.
+
+2. Gemini prompt (refined from 16.0)
+
+   Explicit rules added:
+   - "lat/lng must be the CITY centroid, not the country centroid"
+   - "For cross-regional stories, use the PRIMARY subject location"
+
+   Validation example — "New flyover inaugurated in Coimbatore":
+     Input:  original_region=US (sourced from US feed)
+     Expected output: region_code=IN-TN, lat=11.00, lng=76.96,
+                      city="Coimbatore", confidence=0.93 ✓
+     master_news: geo_source="gemini-1.5-flash", latitude≈11.00 ✓
+
+3. /tasks/ingest (api_storage/routes.py)
+
+   Updated import:
+     from intelligence_layer.refiner import ai_refiner     (was ai_geo_refiner)
+   Updated call:
+     promoted = await ai_refiner.process_buffer(limit=200) (was process_pending)
+
+4. intelligence_layer/ai_geo_refiner.py  (legacy shim)
+
+   Re-exports AIRefiner as AIGeoRefiner and ai_refiner as ai_geo_refiner.
+   Adds process_pending() alias for process_buffer().
+   Ensures any existing references outside routes.py continue to work.
+
+ARCHITECTURE SUMMARY
+---------------------
+
+  Cloud Scheduler (*/15 min)
+       │
+       ▼
+  POST /tasks/ingest
+       │
+       ├─► run_ingestion_cycle()  ──► raw_ingestion_buffer (status=pending)
+       │
+       ├─► _process_and_store()   ──► SQLite (ephemeral; always runs)
+       │
+       └─► ai_refiner.process_buffer()
+               │
+               ├─► Gemini 1.5 Flash (batches of 15)
+               │         └─► GeocodingCache.get/set  (geo_lexicon)
+               │
+               ├─► promote_to_master()  ──► master_news (persistent)
+               │
+               └─► mark_raw_processed() ──► buffer status → "processed"
+                         │
+                         ▼  (if Gemini fails / returns 0)
+                   FirestoreRefiner.refine_pending()  [fallback]
+
+KNOWN GAPS / FUTURE WORK
+-------------------------
+1. GeocodingCache is append-only; stale entries are never evicted.
+   A TTL cleanup job should run weekly to remove outdated coordinates.
+2. Category assignment uses the rule-based keyword classifier (not Gemini).
+   A single-prompt approach (geo + category together) would reduce calls.
+3. Confidence threshold (0.50) may be too permissive for ambiguous city names.
+   Monitor geo_confidence distribution in master_news to calibrate.
+
+================================================================================
+
+================================================================================
 MODULE 16.0 — AI-AGENT GEO-REFINER
 Updated: 2026-03-15
 ================================================================================

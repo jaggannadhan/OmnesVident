@@ -437,15 +437,15 @@ async def trigger_ingestion(
             #    Falls back to the rule-based FirestoreRefiner if AI returns 0.
             promoted = 0
             try:
-                from intelligence_layer.ai_geo_refiner import ai_geo_refiner
-                promoted = await ai_geo_refiner.process_pending(limit=200)
+                from intelligence_layer.refiner import ai_refiner
+                promoted = await ai_refiner.process_buffer(limit=200)
                 if promoted:
                     logger.info(
-                        "/tasks/ingest: AIGeoRefiner promoted %d doc(s) to master_news.",
+                        "/tasks/ingest: AIRefiner promoted %d doc(s) to master_news.",
                         promoted,
                     )
             except Exception as ai_exc:
-                logger.warning("/tasks/ingest: AIGeoRefiner failed — %s", ai_exc)
+                logger.warning("/tasks/ingest: AIRefiner failed — %s", ai_exc)
 
             # Fallback: if AI promoted nothing, use rule-based refiner so the
             # raw buffer is never left stranded (e.g. Vertex AI quota exceeded).
