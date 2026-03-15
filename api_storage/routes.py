@@ -387,6 +387,78 @@ def health_check():
 
 
 # ---------------------------------------------------------------------------
+# One-shot full geo-refinement — POST /tasks/refine-all
+# ---------------------------------------------------------------------------
+
+@app.post("/tasks/refine-all", status_code=202, tags=["Tasks"])
+async def trigger_full_refinement(
+    background_tasks: BackgroundTasks,
+    x_ingest_token: Optional[str] = Header(default=None),
+):
+    """
+    Full geo-refinement pass over both collections:
+
+      Step 1 — Re-run Gemini on all master_news docs (updates region_code,
+               lat, lng, category, geo_confidence in place).
+      Step 2 — Drain the entire raw_ingestion_buffer (process all pending
+               docs and promote to master_news).
+      Step 3 — Fallback: if AI promoted nothing from the buffer, the
+               rule-based refiner handles whatever is left.
+
+    Protected by the same X-Ingest-Token as /tasks/ingest.
+    Always returns 202 immediately; work runs in a BackgroundTask.
+    """
+    if not _INGEST_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Refinement endpoint not configured (INGEST_SECRET not set).",
+        )
+    if x_ingest_token != _INGEST_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-Ingest-Token.")
+
+    async def _run() -> None:
+        try:
+            from intelligence_layer.refiner import ai_refiner
+
+            # Step 1: re-refine all existing master_news docs
+            logger.info("/tasks/refine-all: Step 1 — re-refining master_news.")
+            master_updated = await ai_refiner.refine_master_news(limit=5000)
+            logger.info(
+                "/tasks/refine-all: master_news updated: %d doc(s).", master_updated
+            )
+
+            # Step 2: drain raw_ingestion_buffer
+            logger.info("/tasks/refine-all: Step 2 — draining raw_ingestion_buffer.")
+            promoted = await ai_refiner.process_buffer(limit=5000)
+            logger.info(
+                "/tasks/refine-all: raw buffer promoted: %d doc(s).", promoted
+            )
+
+            # Step 3: rule-based fallback if AI returned 0 from buffer
+            if not promoted:
+                try:
+                    from tasks.refiner import refiner
+                    fb = await refiner.refine_pending(limit=5000)
+                    if fb:
+                        logger.info(
+                            "/tasks/refine-all: fallback refiner promoted %d doc(s).", fb
+                        )
+                except Exception as ref_exc:
+                    logger.warning(
+                        "/tasks/refine-all: fallback refiner failed — %s", ref_exc
+                    )
+
+        except Exception as exc:
+            logger.error("/tasks/refine-all: unhandled error — %s", exc, exc_info=True)
+
+    background_tasks.add_task(_run)
+    return {
+        "status": "accepted",
+        "message": "Full geo-refinement queued (master_news re-refine + buffer drain).",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Cloud Scheduler heartbeat — POST /tasks/ingest
 # ---------------------------------------------------------------------------
 

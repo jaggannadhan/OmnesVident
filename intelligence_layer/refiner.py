@@ -165,51 +165,55 @@ class AIRefiner:
     """
 
     def __init__(self) -> None:
-        self._model = None   # lazy — created on first _get_model() call
+        self._client = None   # lazy — openai.OpenAI, created on first call
 
-    # ── Vertex AI ────────────────────────────────────────────────────────────
+    # ── OpenAI client init ────────────────────────────────────────────────────
 
-    def _get_model(self):
-        if self._model is not None:
-            return self._model
+    def _get_client(self):
+        if self._client is not None:
+            return self._client
+        api_key = os.getenv("OPEN_AI_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
+        if not api_key:
+            logger.warning("AIRefiner: OPEN_AI_API_KEY not set — geo refinement disabled.")
+            return None
         try:
-            import vertexai                                          # type: ignore
-            from vertexai.generative_models import GenerativeModel  # type: ignore
-
-            project = (
-                os.getenv("GOOGLE_CLOUD_PROJECT")
-                or os.getenv("FIRESTORE_PROJECT", "omnesvident")
-            )
-            vertexai.init(project=project, location="us-central1")
-            self._model = GenerativeModel("gemini-1.5-flash")
-            logger.info("AIRefiner: Vertex AI ready (project=%s).", project)
+            from openai import OpenAI  # type: ignore
+            self._client = OpenAI(api_key=api_key)
+            logger.info("AIRefiner: OpenAI client ready.")
         except Exception as exc:
-            logger.warning("AIRefiner: Vertex AI init failed — %s", exc)
-            self._model = None
-        return self._model
+            logger.warning("AIRefiner: OpenAI init failed — %s", exc)
+            self._client = None
+        return self._client
 
-    # ── Gemini call ──────────────────────────────────────────────────────────
+    # ── OpenAI call ───────────────────────────────────────────────────────────
 
     async def _call_gemini(
         self, stories: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        model = self._get_model()
-        if model is None:
+        """Call OpenAI gpt-4o-mini with the geo-resolution prompt."""
+        client = self._get_client()
+        if client is None:
             return []
-        prompt = _SYSTEM_PROMPT + "\n\n" + _build_prompt(stories)
+        prompt = _build_prompt(stories)
         try:
             loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None,
-                lambda: model.generate_content(
-                    prompt,
-                    generation_config={"temperature": 0.1, "max_output_tokens": 2048},
+                lambda: client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    temperature=0.1,
+                    max_tokens=2048,
+                    messages=[
+                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "user",   "content": prompt},
+                    ],
                 ),
             )
-            results = _parse_json(response.text)
+            text = response.choices[0].message.content or ""
+            results = _parse_json(text)
             if len(results) != len(stories):
                 logger.warning(
-                    "AIRefiner: Gemini returned %d results for %d stories.",
+                    "AIRefiner: OpenAI returned %d results for %d stories.",
                     len(results), len(stories),
                 )
             return results
@@ -259,6 +263,90 @@ class AIRefiner:
             region_code = original.get("region_code") or region_code
 
         return region_code, lat, lng, confidence
+
+    # ── Re-refine existing master_news ────────────────────────────────────────
+
+    async def refine_master_news(self, limit: int = 5000) -> int:
+        """
+        Re-run Gemini geo-refinement on ALL existing master_news docs.
+
+        For each doc, calls Gemini to resolve the true primary location, then
+        patches region_code / lat / lng / geo_confidence / geo_source /
+        category in place using Firestore update() (no full overwrite).
+
+        Returns the number of docs successfully updated.
+        Returns 0 (without raising) if Vertex AI or Firestore is unavailable.
+        """
+        from database.firestore_manager import firestore_manager as mgr
+        from intelligence_layer.classifier import classify
+
+        if not mgr._is_enabled():
+            logger.info("AIRefiner.refine_master_news: Firestore disabled — skipping.")
+            return 0
+
+        client = await mgr._get_client()
+        if client is None:
+            return 0
+
+        docs = await mgr.stream_all_master(limit=limit)
+        if not docs:
+            logger.info("AIRefiner.refine_master_news: no docs found in master_news.")
+            return 0
+
+        logger.info(
+            "AIRefiner.refine_master_news: re-refining %d master_news doc(s).", len(docs)
+        )
+
+        cache = GeocodingCache(client)
+        updated = 0
+
+        for batch_start in range(0, len(docs), _BATCH_SIZE):
+            batch = docs[batch_start: batch_start + _BATCH_SIZE]
+
+            story_inputs = [
+                {
+                    "title":       d.get("title", ""),
+                    "snippet":     d.get("snippet", ""),
+                    "region_code": d.get("region_code", ""),
+                }
+                for d in batch
+            ]
+
+            ai_results = await self._call_gemini(story_inputs)
+            while len(ai_results) < len(batch):
+                ai_results.append({})
+
+            for doc, story_input, ai_result in zip(batch, story_inputs, ai_results):
+                doc_id = doc.get("_doc_id", "")
+                try:
+                    region_code, lat, lng, confidence = await self._resolve(
+                        story_input, ai_result, cache
+                    )
+                    category = classify(doc.get("title", ""), doc.get("snippet", ""))
+
+                    ok = await mgr.update_master_geo(doc_id, {
+                        "region_code":    region_code,
+                        "latitude":       lat,
+                        "longitude":      lng,
+                        "geo_confidence": round(confidence, 3),
+                        "geo_source":     "gemini-1.5-flash",
+                        "category":       category,
+                    })
+                    if ok:
+                        updated += 1
+                        logger.debug(
+                            "AIRefiner.refine_master_news: %s → %s (conf=%.2f)",
+                            doc_id, region_code, confidence,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "AIRefiner.refine_master_news: doc %s failed — %s", doc_id, exc
+                    )
+
+        logger.info(
+            "AIRefiner.refine_master_news: updated=%d of %d total.", updated, len(docs)
+        )
+        return updated
 
     # ── Main entry point ──────────────────────────────────────────────────────
 

@@ -27,6 +27,9 @@ google-cloud-firestore>=2.16.0
 # GCP — Vertex AI / Gemini (optional; used by AIGeoRefiner in Cloud Run)
 google-cloud-aiplatform[generative_ai]>=1.70.0
 
+# OpenAI — used by AIRefiner for geo-location resolution
+openai>=1.0.0
+
 # Testing
 pytest>=8.0.0
 pytest-asyncio>=0.23.0

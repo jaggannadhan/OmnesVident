@@ -374,6 +374,47 @@ class FirestoreManager:
             )
             return -1
 
+    async def stream_all_master(self, limit: int = 5000) -> List[Dict[str, Any]]:
+        """
+        Stream ALL documents from master_news (for bulk re-refinement).
+        No ordering/filtering — just a full collection scan up to `limit`.
+        """
+        if not self._is_enabled():
+            return []
+        client = await self._get_client()
+        if client is None:
+            return []
+        try:
+            q = client.collection(_MASTER_COLLECTION).limit(limit)
+            results = []
+            async for doc in q.stream():
+                data = doc.to_dict()
+                data["_doc_id"] = doc.id
+                results.append(data)
+            return results
+        except Exception as exc:
+            logger.error("FirestoreManager.stream_all_master: failed — %s", exc)
+            return []
+
+    async def update_master_geo(
+        self, doc_id: str, geo_fields: Dict[str, Any]
+    ) -> bool:
+        """Patch geo fields on an existing master_news document in place."""
+        if not self._is_enabled():
+            return False
+        client = await self._get_client()
+        if client is None:
+            return False
+        try:
+            doc_ref = client.collection(_MASTER_COLLECTION).document(doc_id)
+            await doc_ref.update(geo_fields)
+            return True
+        except Exception as exc:
+            logger.error(
+                "FirestoreManager.update_master_geo: %s — %s", doc_id, exc
+            )
+            return False
+
     async def get_coverage(self) -> Dict[str, Any]:
         """
         Return the oldest and newest timestamps in master_news, plus total count.
