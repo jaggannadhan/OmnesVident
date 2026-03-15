@@ -327,6 +327,141 @@ KNOWN GAPS / FUTURE WORK
 ================================================================================
 
 ================================================================================
+MODULE 16.0 — AI-AGENT GEO-REFINER
+Updated: 2026-03-15
+================================================================================
+
+OBJECTIVE
+---------
+Replace the rule-based TagEnhancer geo-resolution path with an AI agent that
+uses Gemini 1.5 Flash (Vertex AI) to accurately identify the geographic location
+each story is ABOUT — not where it was sourced from.  Fixes the core "Mumbai
+story tagged US-WA" problem caused by feed-geography ≠ story-geography.
+
+IMPLEMENTATION STATUS: COMPLETE
+---------------------------------
+
+1. intelligence_layer/ai_geo_refiner.py  (new)
+
+   Class: AIGeoRefiner
+   Singleton: ai_geo_refiner (module-level)
+
+   Key methods:
+   - process_pending(limit=100) → int
+       Main entry point.  Fetches pending raw_ingestion_buffer docs, processes
+       them in batches of 15 through Gemini, promotes to master_news, marks
+       buffer docs as "processed".  Returns count of promoted docs.
+
+   - _call_gemini(stories) → List[dict]
+       Sends a numbered batch prompt to Gemini 1.5 Flash via Vertex AI SDK.
+       Runs sync SDK in asyncio thread executor (non-blocking).
+       Parses JSON array from response; strips markdown fences if present.
+
+   - _resolve(original, ai_result, client) → (region_code, lat, lng, confidence)
+       Merges Gemini output with geo_lexicon cache:
+         * If city name returned by Gemini is in geo_lexicon → use cached coords.
+         * If city is new and Gemini has coords → populate geo_lexicon.
+         * If confidence < 0.50 → keep original feed-level region_code.
+
+   - _lexicon_get / _lexicon_set
+       Read/write geo_lexicon Firestore collection keyed by city name (lowercase).
+
+2. Gemini prompt design
+
+   System prompt instructs the model to:
+   - Identify the location the story IS ABOUT (not where it was published).
+   - Return ISO 3166-2 subdivision codes (IN-MH, US-TX) when a city/state is named.
+   - Use ISO alpha-2 country codes (IN, US) for national-level stories.
+   - Set confidence < 0.5 for uncertain cases (keeps original region unchanged).
+   - Return city centroid lat/lng, not country centroid.
+
+   Output schema per story:
+     {"region_code": "IN-MH", "lat": 19.07, "lng": 72.87,
+      "city": "Mumbai", "confidence": 0.95}
+
+   Example fix:
+     Input:  title="Mumbai infrastructure plan unveiled for coastal highway"
+             original_region=US-WA (from US tech feed)
+     Output: region_code=IN-MH, lat=19.07, lng=72.87, confidence=0.95 ✓
+
+3. Geo Lexicon (Firestore collection: geo_lexicon)
+
+   Document ID: city name, lowercase (e.g. "mumbai", "chennai", "london")
+   Fields:      region_code, lat, lng, confidence, _city, cached_at
+
+   Purpose: avoid paying Gemini token cost for repeatedly-seen cities.
+   After the first "Mumbai" story is resolved, all subsequent Mumbai stories
+   skip the AI coordinate lookup and use the cached (19.07, 72.87).
+
+   The lexicon grows automatically — no manual seeding required.
+
+4. Promotion to master_news
+
+   AIGeoRefiner calls mgr.promote_to_master(event, date_group, extra_fields)
+   with extra_fields containing:
+     - latitude / longitude   (AI-resolved city centroid)
+     - geo_confidence         (Gemini confidence score, 0.0–1.0)
+     - geo_source             "gemini-1.5-flash"
+     - category               (rule-based classifier applied inline)
+
+   Document ID remains SHA-256[:24](source_url) for idempotency.
+
+5. /tasks/ingest update (api_storage/routes.py)
+
+   Replaced the single FirestoreRefiner call with a two-stage approach:
+
+   Stage 1: AIGeoRefiner.process_pending(limit=200)
+     - AI-powered geo resolution + promotion.
+     - If this promotes ≥ 1 doc, Stage 2 is skipped.
+
+   Stage 2 (fallback): FirestoreRefiner.refine_pending(limit=200)
+     - Rule-based TagEnhancer path.
+     - Runs only when Stage 1 promotes 0 docs (Vertex AI quota exceeded,
+       cold-start failure, or unavailable credentials).
+     - Ensures raw buffer is never left stranded regardless of AI availability.
+
+6. New dependency
+
+   requirements.txt:
+     google-cloud-aiplatform[generative_ai]>=1.70.0
+
+   IAM: Cloud Run service account already has roles/aiplatform.user bound
+   (same SA that has roles/datastore.user and secretmanager.secretAccessor).
+   If not yet added:
+     gcloud projects add-iam-policy-binding omnesvident \
+       --member="serviceAccount:880643611795-compute@developer.gserviceaccount.com" \
+       --role="roles/aiplatform.user"
+
+VALIDATION
+----------
+Test case — "New bridge in Madurai":
+  Input:  region_code=US (ingested from US international feed)
+          title="New bridge inaugurated in Madurai"
+  Expected Gemini output:
+          {"region_code": "IN-TN", "lat": 9.93, "lng": 78.12,
+           "city": "Madurai", "confidence": 0.92}
+  Verify in Firestore master_news:
+          region_code = "IN-TN"
+          latitude    ≈ 9.93
+          geo_source  = "gemini-1.5-flash"
+
+KNOWN GAPS / FUTURE WORK
+-------------------------
+1. Vertex AI free tier has limited quota; sustained 15-min cycles may hit
+   rate limits.  Consider batching up to the quota ceiling or caching more
+   aggressively in geo_lexicon.
+2. Gemini occasionally returns fewer array items than the batch size (counted
+   mismatch logged at WARNING level).  Padding with {} means those stories fall
+   through to the fallback refiner.
+3. geo_lexicon is append-only; stale coordinates (e.g. city renamed or
+   boundary updated) are never evicted.  A TTL field with periodic cleanup
+   job would improve long-term accuracy.
+4. category assignment uses the rule-based keyword classifier, not Gemini.
+   A future enhancement could ask Gemini for category in the same prompt.
+
+================================================================================
+
+================================================================================
 MODULE 15.0 — TEMPORAL QUERY ENGINE
 Updated: 2026-03-15
 ================================================================================

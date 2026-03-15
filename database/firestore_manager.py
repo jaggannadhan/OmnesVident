@@ -340,6 +340,40 @@ class FirestoreManager:
             )
             return []
 
+    async def count_master_by_timestamp(
+        self,
+        region_code: Optional[str] = None,
+        start_dt: Optional[datetime] = None,
+        end_dt: Optional[datetime] = None,
+    ) -> int:
+        """
+        Return the count of master_news docs matching the given filters using
+        Firestore's count() aggregate (no document reads billed).
+
+        Returns -1 if Firestore is unavailable or the aggregate fails.
+        """
+        if not self._is_enabled():
+            return -1
+        client = await self._get_client()
+        if client is None:
+            return -1
+
+        try:
+            q = client.collection(_MASTER_COLLECTION)
+            if region_code:
+                q = q.where("region_code", "==", region_code.upper())
+            if start_dt:
+                q = q.where("timestamp", ">=", start_dt)
+            if end_dt:
+                q = q.where("timestamp", "<=", end_dt)
+            agg_result = await q.count().get()
+            return agg_result[0][0].value
+        except Exception as exc:
+            logger.error(
+                "FirestoreManager.count_master_by_timestamp: failed — %s", exc
+            )
+            return -1
+
     async def get_coverage(self) -> Dict[str, Any]:
         """
         Return the oldest and newest timestamps in master_news, plus total count.

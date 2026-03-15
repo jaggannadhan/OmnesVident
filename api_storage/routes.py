@@ -192,16 +192,24 @@ async def _query_firestore(
         if not firestore_manager._is_enabled():
             return None
 
-        docs = await firestore_manager.query_master_by_timestamp(
-            region_code=region,
-            start_dt=start_date,
-            end_dt=end_date,
-            limit=limit,
-            offset=offset,
+        docs, total = await asyncio.gather(
+            firestore_manager.query_master_by_timestamp(
+                region_code=region,
+                start_dt=start_date,
+                end_dt=end_date,
+                limit=limit,
+                offset=offset,
+            ),
+            firestore_manager.count_master_by_timestamp(
+                region_code=region,
+                start_dt=start_date,
+                end_dt=end_date,
+            ),
         )
         stories = [_firestore_doc_to_story_out(d) for d in docs]
-        # Firestore doesn't give us an exact total cheaply; use len + offset as estimate
-        total = offset + len(stories) + (1 if len(stories) == limit else 0)
+        # Fall back to a lower-bound estimate only if the count aggregate failed
+        if total < 0:
+            total = offset + len(stories) + (1 if len(stories) == limit else 0)
         return PaginatedStoriesResponse(
             total=total, offset=offset, limit=limit, stories=stories
         )
@@ -423,15 +431,35 @@ async def trigger_ingestion(
             await _process_and_store(events)
             logger.info("/tasks/ingest: SQLite pipeline processed %d event(s).", len(events))
 
-            # 2. Firestore Refiner — runs after raw buffer push (done in runner.py)
-            #    Promotes pending raw docs to master_news with subdivision tagging.
+            # 2. AI Geo Refiner — resolves true story geography via Gemini 1.5 Flash,
+            #    checks geo_lexicon cache, then promotes to master_news with
+            #    AI-verified region_code / lat / lng / category.
+            #    Falls back to the rule-based FirestoreRefiner if AI returns 0.
+            promoted = 0
             try:
-                from tasks.refiner import refiner
-                promoted = await refiner.refine_pending(limit=200)
+                from intelligence_layer.ai_geo_refiner import ai_geo_refiner
+                promoted = await ai_geo_refiner.process_pending(limit=200)
                 if promoted:
-                    logger.info("/tasks/ingest: Refiner promoted %d doc(s) to master_news.", promoted)
-            except Exception as ref_exc:
-                logger.warning("/tasks/ingest: Refiner skipped — %s", ref_exc)
+                    logger.info(
+                        "/tasks/ingest: AIGeoRefiner promoted %d doc(s) to master_news.",
+                        promoted,
+                    )
+            except Exception as ai_exc:
+                logger.warning("/tasks/ingest: AIGeoRefiner failed — %s", ai_exc)
+
+            # Fallback: if AI promoted nothing, use rule-based refiner so the
+            # raw buffer is never left stranded (e.g. Vertex AI quota exceeded).
+            if not promoted:
+                try:
+                    from tasks.refiner import refiner
+                    fb = await refiner.refine_pending(limit=200)
+                    if fb:
+                        logger.info(
+                            "/tasks/ingest: Fallback refiner promoted %d doc(s).",
+                            fb,
+                        )
+                except Exception as ref_exc:
+                    logger.warning("/tasks/ingest: Fallback refiner failed — %s", ref_exc)
 
         except Exception as exc:
             logger.error("/tasks/ingest: unhandled error — %s", exc, exc_info=True)

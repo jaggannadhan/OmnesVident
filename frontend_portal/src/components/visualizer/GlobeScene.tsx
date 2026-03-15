@@ -1,4 +1,4 @@
-import { Suspense, useState, useCallback, useEffect } from "react";
+import { Suspense, useState, useCallback, useEffect, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Stars } from "@react-three/drei";
 import { Earth } from "./Earth";
@@ -67,24 +67,87 @@ function GlobeLoader() {
 }
 
 // ---------------------------------------------------------------------------
-// Legend overlay (pure DOM, outside Canvas)
+// Legend overlay — collapsible
 // ---------------------------------------------------------------------------
 
-function Legend() {
+const LEGEND_PREVIEW_COLORS = ["#f87171", "#22d3ee", "#34d399", "#a78bfa", "#fb923c"];
+
+function CollapsibleLegend() {
+  const [open, setOpen] = useState(false);
   const entries = Object.entries(CATEGORY_COLORS);
+
   return (
-    <div className="absolute bottom-3 left-3 flex flex-wrap gap-x-3 gap-y-1 pointer-events-none">
-      {entries.map(([cat, color]) => (
-        <div key={cat} className="flex items-center gap-1">
-          <span
-            className="inline-block w-2 h-2 rounded-full"
-            style={{ background: color, boxShadow: `0 0 4px ${color}` }}
-          />
-          <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">
-            {CATEGORY_META[cat]?.label ?? cat}
-          </span>
+    <div className="absolute bottom-3 left-3 z-10">
+      {/* Toggle button — always visible */}
+      <button
+        onClick={() => setOpen((p) => !p)}
+        className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-rim bg-base/80 backdrop-blur-sm text-slate-400 hover:text-slate-200 hover:border-rim-bright transition-colors"
+      >
+        {/* Mini colour dots */}
+        <span className="flex gap-0.5">
+          {LEGEND_PREVIEW_COLORS.map((c) => (
+            <span
+              key={c}
+              className="inline-block w-1.5 h-1.5 rounded-full"
+              style={{ background: c, boxShadow: `0 0 3px ${c}` }}
+            />
+          ))}
+        </span>
+        <span className="text-[9px] font-mono uppercase tracking-widest">Legend</span>
+        <span className="text-[8px] text-slate-600">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {/* Expanded panel */}
+      {open && (
+        <div className="mt-1 p-2 rounded-md border border-rim bg-base/90 backdrop-blur-sm flex flex-wrap gap-x-3 gap-y-1.5 max-w-[260px]">
+          {entries.map(([cat, color]) => (
+            <div key={cat} className="flex items-center gap-1">
+              <span
+                className="inline-block w-2 h-2 rounded-full shrink-0"
+                style={{ background: color, boxShadow: `0 0 4px ${color}` }}
+              />
+              <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider">
+                {CATEGORY_META[cat]?.label ?? cat}
+              </span>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sync countdown — counts to the next 15-minute scheduler boundary
+// ---------------------------------------------------------------------------
+
+function SyncCountdown() {
+  const [secsLeft, setSecsLeft] = useState(() => {
+    const ms = 15 * 60 * 1000;
+    return Math.ceil((ms - (Date.now() % ms)) / 1000);
+  });
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      setSecsLeft(() => {
+        const ms = 15 * 60 * 1000;
+        return Math.ceil((ms - (Date.now() % ms)) / 1000);
+      });
+    }, 1000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, []);
+
+  const m = String(Math.floor(secsLeft / 60)).padStart(2, "0");
+  const s = String(secsLeft % 60).padStart(2, "0");
+
+  return (
+    <div className="flex items-center gap-2 px-2.5 py-1 rounded-md border border-cyan-500/20 bg-cyan-400/5 backdrop-blur-sm pointer-events-none">
+      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0" />
+      <span className="text-[9px] font-mono text-cyan-500/80 uppercase tracking-widest">
+        sync in{" "}
+        <span className="text-cyan-300 font-semibold tabular-nums">{m}:{s}</span>
+      </span>
     </div>
   );
 }
@@ -154,7 +217,7 @@ interface GlobeSceneProps {
 }
 
 export function GlobeScene({ region, category, startDate, endDate }: GlobeSceneProps) {
-  const { data, isLoading } = useNews({ region, category, limit: 1000, start_date: startDate, end_date: endDate });
+  const { data } = useNews({ region, category, limit: 1000, start_date: startDate, end_date: endDate });
   const stories = data?.stories ?? [];
 
   // Pause auto-rotation while the cursor is over the globe
@@ -179,19 +242,9 @@ export function GlobeScene({ region, category, startDate, endDate }: GlobeSceneP
       onPointerLeave={() => setCursorOver(false)}
     >
 
-      {/* Live blip count */}
-      <div className="absolute top-3 left-3 z-10 flex items-center gap-2 pointer-events-none">
-        <span className="text-[10px] font-mono text-slate-500">
-          {isLoading ? "Loading…" : `${stories.length} blips active`}
-        </span>
-        {!isLoading && stories.length > 0 && (
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-        )}
-      </div>
-
-      {/* Interaction hint */}
-      <div className="absolute top-3 right-3 z-10 pointer-events-none">
-        <span className="text-[9px] font-mono text-slate-700">Drag · Scroll · Click marker</span>
+      {/* Sync countdown — top-right */}
+      <div className="absolute top-3 right-3 z-10">
+        <SyncCountdown />
       </div>
 
       <Canvas
@@ -246,7 +299,7 @@ export function GlobeScene({ region, category, startDate, endDate }: GlobeSceneP
         />
       )}
 
-      <Legend />
+      <CollapsibleLegend />
     </div>
   );
 }
