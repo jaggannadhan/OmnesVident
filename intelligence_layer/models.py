@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, field_serializer
 
@@ -23,6 +23,10 @@ class EnrichedStory(BaseModel):
 
     dedup_group_id: str                  # Stable hash for the cluster
     processed_at: datetime
+
+    # Geo-Intelligence (Module 6) — resolved by GeoResolver
+    latitude: Optional[float] = None    # WGS84 decimal degrees
+    longitude: Optional[float] = None   # WGS84 decimal degrees
 
     @field_serializer("processed_at")
     def serialize_processed_at(self, value: datetime) -> str:

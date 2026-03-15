@@ -160,7 +160,7 @@ function FeedView() {
                       </div>
                     }
                   >
-                    <GlobeScene region={regionCode} />
+                    <GlobeScene region={regionCode} category={category} />
                   </Suspense>
                 </GlobeErrorBoundary>
               </div>

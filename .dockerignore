@@ -1,0 +1,49 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment & secrets
+.env
+*.env
+
+# Database files (Cloud Run uses ephemeral storage; use Cloud SQL or Firestore)
+*.db
+*.sqlite
+*.sqlite3
+
+# Budget state (Cloud Run instances are stateless — scheduler state is ephemeral)
+ingestion_engine/core/budget_state.json
+
+# Frontend (not served by the API container)
+frontend_portal/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Docs
+*.md
+Imp_det.txt
+Makefile
+
+# Cloud Build / Docker
+cloudbuild.yaml
+Dockerfile
+.dockerignore

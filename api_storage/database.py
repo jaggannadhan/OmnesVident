@@ -59,6 +59,10 @@ class StoryRecord(SQLModel, table=True):
     secondary_sources_json: str = Field(default="[]")   # JSON: List[str]
     processed_at: datetime
 
+    # Geo-Intelligence (Module 6)
+    latitude: Optional[float] = Field(default=None)     # WGS84 decimal degrees
+    longitude: Optional[float] = Field(default=None)    # WGS84 decimal degrees
+
     # ---------------------
     @property
     def mentioned_regions(self) -> List[str]:

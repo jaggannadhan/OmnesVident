@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# cloudbuild.yaml — OmnesVident CI/CD pipeline for Google Cloud Build
+#
+# Substitution variables (set in Cloud Build trigger or pass via --substitutions):
+#   _REGION        GCP region for Cloud Run (e.g. us-central1)
+#   _SERVICE_NAME  Cloud Run service name   (e.g. omnesvident-api)
+#   _AR_REPO       Artifact Registry repo   (e.g. omnesvident)
+#
+# Required Secret Manager secrets (referenced as env vars in Cloud Run):
+#   NEWSDATA_API_KEY, NEWSCATCHER_API_KEY, CURRENTS_NEW_API,
+#   WORLD_NEWS_API_KEY, MEDIA_STACK_NEWS_API_KEY, GNEWS_API, INGEST_SECRET
+#
+# Trigger with:
+#   gcloud builds submit \
+#     --config cloudbuild.yaml \
+#     --substitutions _REGION=us-central1,_SERVICE_NAME=omnesvident-api,_AR_REPO=omnesvident
+# ─────────────────────────────────────────────────────────────────────────────
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE_NAME: omnesvident-api
+  _AR_REPO: omnesvident
+
+steps:
+  # ── Step 1: Build the container image ──────────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - --tag
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_NAME}:$SHORT_SHA
+      - --tag
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_NAME}:latest
+      - --cache-from
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_NAME}:latest
+      - .
+
+  # ── Step 2: Push image to Artifact Registry ─────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: push
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_NAME}
+
+  # ── Step 3: Deploy to Cloud Run ─────────────────────────────────────────────
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_NAME}:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=512Mi
+      - --cpu=1
+      - --max-instances=10
+      - --min-instances=0
+      - --concurrency=80
+      - --timeout=300
+      - --set-secrets=NEWSDATA_API_KEY=NEWSDATA_API_KEY:latest,NEWSCATCHER_API_KEY=NEWSCATCHER_API_KEY:latest,CURRENTS_NEW_API=CURRENTS_NEW_API:latest,WORLD_NEWS_API_KEY=WORLD_NEWS_API_KEY:latest,MEDIA_STACK_NEWS_API_KEY=MEDIA_STACK_NEWS_API_KEY:latest,GNEWS_API=GNEWS_API:latest,INGEST_SECRET=INGEST_SECRET:latest
+
+# Push the tagged image to Artifact Registry after a successful build
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_NAME}:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_NAME}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8

@@ -1,0 +1,83 @@
+{
+  "US": [
+    {"code": "US-CA", "name": "California"},
+    {"code": "US-TX", "name": "Texas"},
+    {"code": "US-NY", "name": "New York"},
+    {"code": "US-FL", "name": "Florida"},
+    {"code": "US-WA", "name": "Washington"},
+    {"code": "US-IL", "name": "Illinois"},
+    {"code": "US-PA", "name": "Pennsylvania"},
+    {"code": "US-OH", "name": "Ohio"},
+    {"code": "US-GA", "name": "Georgia"},
+    {"code": "US-NC", "name": "North Carolina"},
+    {"code": "US-MI", "name": "Michigan"},
+    {"code": "US-AZ", "name": "Arizona"},
+    {"code": "US-CO", "name": "Colorado"},
+    {"code": "US-VA", "name": "Virginia"},
+    {"code": "US-TN", "name": "Tennessee"}
+  ],
+  "IN": [
+    {"code": "IN-MH", "name": "Maharashtra"},
+    {"code": "IN-DL", "name": "Delhi"},
+    {"code": "IN-KA", "name": "Karnataka"},
+    {"code": "IN-TN", "name": "Tamil Nadu"},
+    {"code": "IN-WB", "name": "West Bengal"},
+    {"code": "IN-GJ", "name": "Gujarat"},
+    {"code": "IN-RJ", "name": "Rajasthan"},
+    {"code": "IN-UP", "name": "Uttar Pradesh"},
+    {"code": "IN-TS", "name": "Telangana"},
+    {"code": "IN-AP", "name": "Andhra Pradesh"},
+    {"code": "IN-KL", "name": "Kerala"},
+    {"code": "IN-PB", "name": "Punjab"}
+  ],
+  "CN": [
+    {"code": "CN-BJ", "name": "Beijing"},
+    {"code": "CN-SH", "name": "Shanghai"},
+    {"code": "CN-GD", "name": "Guangdong"},
+    {"code": "CN-SC", "name": "Sichuan"},
+    {"code": "CN-HB", "name": "Hubei"},
+    {"code": "CN-ZJ", "name": "Zhejiang"},
+    {"code": "CN-JS", "name": "Jiangsu"},
+    {"code": "CN-SN", "name": "Shaanxi"},
+    {"code": "CN-SD", "name": "Shandong"},
+    {"code": "CN-HN", "name": "Henan"}
+  ],
+  "BR": [
+    {"code": "BR-SP", "name": "São Paulo"},
+    {"code": "BR-RJ", "name": "Rio de Janeiro"},
+    {"code": "BR-MG", "name": "Minas Gerais"},
+    {"code": "BR-CE", "name": "Ceará"},
+    {"code": "BR-BA", "name": "Bahia"},
+    {"code": "BR-RS", "name": "Rio Grande do Sul"},
+    {"code": "BR-PR", "name": "Paraná"},
+    {"code": "BR-PE", "name": "Pernambuco"},
+    {"code": "BR-GO", "name": "Goiás"},
+    {"code": "BR-AM", "name": "Amazonas"}
+  ],
+  "CA": [
+    {"code": "CA-ON", "name": "Ontario"},
+    {"code": "CA-BC", "name": "British Columbia"},
+    {"code": "CA-QC", "name": "Québec"},
+    {"code": "CA-AB", "name": "Alberta"},
+    {"code": "CA-MB", "name": "Manitoba"},
+    {"code": "CA-SK", "name": "Saskatchewan"},
+    {"code": "CA-NS", "name": "Nova Scotia"}
+  ],
+  "AU": [
+    {"code": "AU-NSW", "name": "New South Wales"},
+    {"code": "AU-VIC", "name": "Victoria"},
+    {"code": "AU-QLD", "name": "Queensland"},
+    {"code": "AU-WA",  "name": "Western Australia"},
+    {"code": "AU-SA",  "name": "South Australia"},
+    {"code": "AU-TAS", "name": "Tasmania"},
+    {"code": "AU-ACT", "name": "Canberra"}
+  ],
+  "ZA": [
+    {"code": "ZA-GT", "name": "Gauteng"},
+    {"code": "ZA-WC", "name": "Western Cape"},
+    {"code": "ZA-KZN","name": "KwaZulu-Natal"},
+    {"code": "ZA-EC", "name": "Eastern Cape"},
+    {"code": "ZA-LP", "name": "Limpopo"},
+    {"code": "ZA-MP", "name": "Mpumalanga"}
+  ]
+}

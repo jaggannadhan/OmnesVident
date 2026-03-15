@@ -1,0 +1,1575 @@
+================================================================================
+  OMNESVIDENT — IMPLEMENTATION DETAILS (ALL MODULES)
+  Last Updated: 2026-03-14
+================================================================================
+
+
+================================================================================
+  MODULE 1 — INGESTION ENGINE
+  Date: 2026-03-12
+================================================================================
+
+SUCCESSES
+---------
+1. Directory structure
+   All specified directories and files created:
+   ingestion_engine/{providers,core,tests}/__init__.py, base.py,
+   newsdata_io.py, rss_provider.py, models.py, normalizer.py, manager.py,
+   main.py.
+
+2. NewsEvent schema (core/models.py)
+   Pydantic v2 BaseModel with all six required fields: title (str),
+   snippet (str), source_url (str), source_name (str), region_code (str),
+   timestamp (datetime, UTC).
+   Custom @field_serializer for timestamp produces clean ISO-8601 strings
+   (Pydantic v2 idiomatic — no deprecation warnings).
+
+3. Normalization logic (core/normalizer.py)
+   - clean_and_truncate(text): strips <script>/<style>, all HTML tags,
+     collapses whitespace, finds sentence boundary within 200-char window,
+     hard-truncates at 157 chars + "..." as fallback.
+   - strip_html(text): title-level HTML strip, no truncation.
+
+4. BaseProvider ABC (providers/base.py)
+   Abstract base with async fetch() -> List[NewsEvent] and abstract name
+   property. Enforces contract for all provider subclasses.
+
+5. NewsDataProvider (providers/newsdata_io.py)
+   - Reads NEWSDATA_API_KEY from environment; falls back to mock data.
+   - 8-headline _MOCK_POOL rotated by country-code hash → classifiable
+     categories (POLITICS, SCIENCE, TECHNOLOGY, etc.) without a real key.
+   - Async GET via httpx, 15s timeout; per-provider error isolation.
+
+6. RSSProvider (providers/rss_provider.py)
+   - Accepts feed URLs + region_code; feedparser runs in thread-pool
+     executor to avoid blocking the event loop.
+   - Handles malformed feeds per-URL, logs and continues.
+
+7. IngestionManager (core/manager.py)
+   asyncio.gather() across all providers; _safe_fetch() wrapper isolates
+   provider-level exceptions from cancelling peer fetches.
+
+8. main.py
+   - NEWSDATA_COUNTRIES: all 20 sidebar regions (us, ca, mx, ar, br, gb,
+     de, fr, it, ua, jp, cn, in, au, kr, il, sa, eg, za, ng).
+   - push_to_api(events): POSTs serialized batch to {API_BASE_URL}/ingest
+     via httpx — ensures ingested events actually reach the API.
+
+9. Test suite — 14 tests, 0 failures, 0 warnings
+   test_normalizer.py (8), test_models.py (3), test_manager.py (3).
+
+
+FAILURES / BLOCKERS
+-------------------
+1. Live newsdata.io API not tested — no real key available.
+2. RSS feeds not fetched in CI — feedparser makes live HTTP calls.
+3. Deduplication not in this module — deferred to Module 2.
+
+
+TECHNICAL DEBT
+--------------
+1. No pagination in NewsDataProvider (newsdata.io nextPage cursor unused).
+2. run_in_executor uses default thread pool — no back-pressure bounding.
+3. region_code is caller-assigned, not inferred from article content.
+4. No retry/back-off logic on transient network failures.
+5. snippet length enforced at normalizer level, not Pydantic field_validator.
+
+================================================================================
+
+
+================================================================================
+  MODULE 2 — INTELLIGENCE LAYER
+  Date: 2026-03-12
+================================================================================
+
+SUCCESSES
+---------
+1. Package structure
+   intelligence_layer/{__init__.py, models.py, deduplicator.py,
+   classifier.py, entities.py, pipeline.py, tests/}
+
+2. EnrichedStory model (models.py)
+   - lead_event: NewsEvent, secondary_sources: List[str],
+     category: str, mentioned_regions: List[str],
+     dedup_group_id: str (8-char SHA-1 hex), processed_at: datetime.
+
+3. Deduplication — Stage 1: Exact URL match (deduplicator.py)
+   URL normalization strips scheme, www, trailing slashes, query strings,
+   fragments. O(1) set lookup.
+
+4. Deduplication — Stage 2: Fuzzy title match (deduplicator.py)
+   - thefuzz fuzz.token_sort_ratio, threshold=85, same region_code +
+     24-hour sliding window required.
+   - Earliest-timestamp event becomes cluster lead.
+
+5. Topic classifier — keyword-based (classifier.py)
+   8 categories; ~130 regex patterns compiled at import; title matches ×2
+   weight; alphabetic tie-breaking; WORLD fallback. Sub-millisecond.
+
+6. Geo-enrichment (entities.py)
+   150+ country name/adjective entries → ISO alpha-2; sorted longest-first
+   to prevent "Korea" matching before "North Korea".
+
+7. IntelligencePipeline (pipeline.py)
+   Chains: deduplicate → classify → extract_mentioned_regions.
+   Synchronous; async wrapper added in Module 3.
+
+8. Test suite — 41 tests, 0 failures, 0 warnings
+   test_deduplicator.py (13), test_classifier.py (12),
+   test_entities.py (8), test_pipeline.py (10).
+
+
+FAILURES / BLOCKERS
+-------------------
+1. Classifier ties on boundary stories (TECHNOLOGY vs BUSINESS).
+2. No recall for non-English text — all patterns are English-only.
+3. Demonyms ("Washington announces…", "The Kremlin said…") not extracted.
+4. Deduplicator is O(n²) worst case — fine ≤500 events.
+
+
+TECHNICAL DEBT
+--------------
+1. Deduplication was stateless across cycles — resolved in Module 3
+   via SeenStory table.
+2. _RAW_RULES live in source code — YAML config would allow non-code tuning.
+3. Sliding window uses article timestamps, not ingestion time.
+4. EnrichedStory.category is unvalidated str (not Literal[...]).
+5. Pipeline synchronous — async wrapper added in Module 3 routes.py.
+
+================================================================================
+
+
+================================================================================
+  MODULE 3 — API & DATA STORE
+  Date: 2026-03-13
+================================================================================
+
+SUCCESSES
+---------
+1. Package structure
+   api_storage/{__init__.py, database.py, repository.py, schemas.py,
+   routes.py, tests/conftest.py, tests/test_repository.py,
+   tests/test_routes.py}
+
+2. Database schema (database.py) — SQLModel + SQLite
+   StoryRecord: flattened lead-event columns, category (indexed),
+   dedup_group_id (indexed, UNIQUE), mentioned_regions_json,
+   secondary_sources_json, latitude, longitude (Module 6).
+   SeenStory: dedup_group_id PK, first_seen_at, last_seen_at.
+
+3. Repository — upsert/merge (repository.py)
+   save_stories(): SELECT → INSERT or merge secondary_sources.
+   Batch commit (one commit per batch, not per row).
+
+4. Stateful cross-cycle deduplication
+   get_seen_group_ids() returns group IDs seen in last 24h.
+   POST /ingest pre-filters pipeline output against this set.
+
+5. GET /news + GET /news/{region_code}
+   Dual-region filter: region_code column OR mentioned_regions_json
+   contains the code (cross-regional discovery).
+   Paginated; ordered timestamp DESC.
+
+6. POST /ingest
+   202 Accepted immediately; processing via BackgroundTasks +
+   run_in_executor (resolves Module 2 sync/async debt).
+
+7. App lifespan: create_db_and_tables() + cleanup_old_seen_stories(48h).
+
+8. Test suite — 31 tests, 0 failures, 0 warnings
+   test_repository.py (16), test_routes.py (15).
+   conftest.py: in-memory SQLite overrides both FastAPI dep and module
+   engine used by background tasks.
+
+
+FAILURES / BLOCKERS
+-------------------
+1. No job ID / poll URL on POST /ingest (fire-and-forget only).
+2. Total count uses a second full query scan (no window function).
+3. Cross-regional filter is a JSON string LIKE — not proper array query.
+4. No auth or rate limiting on POST /ingest.
+
+
+TECHNICAL DEBT
+--------------
+1. SQLite unsuitable beyond MVP — migration path: change DATABASE_URL.
+2. StoryRecord JSON properties use convention-only change tracking.
+3. Cleanup is opportunistic (startup + ingest), not scheduled.
+4. No Alembic migration toolchain.
+
+================================================================================
+
+
+================================================================================
+  MODULE 4 — FRONTEND DISCOVERY PORTAL
+  Date: 2026-03-13
+================================================================================
+
+SUCCESSES
+---------
+1. Scaffold: Vite 5 + React 18 + TypeScript strict mode.
+   Zero TS errors; production build ~220 KB JS / 18 KB CSS (69.5 / 4.2 KB gz).
+
+2. Tailwind "Command Center" palette:
+   base (#06060f), surface (#0d0d1a), panel (#121228), card (#181832),
+   rim/rim-bright border hierarchy. Per-category accent utilities.
+
+3. api.ts: fetchNews() + fetchHealth(); VITE_API_BASE_URL → /api default.
+
+4. useNews.ts: TanStack Query v5; staleTime 5m, refetchInterval 5m,
+   keepPreviousData (placeholderData).
+
+5. NewsCard.tsx: Fair-Use compliant — source name prominent, title links
+   to publisher, no iframes. Secondary sources dropdown (aria-expanded).
+   Category/region badge click updates active filter.
+
+6. NewsGrid.tsx: 3-col responsive; loading skeletons, error panel,
+   empty-state. Background-refetch "Refreshing…" indicator. Pagination.
+
+7. Sidebar.tsx: Category (8) + Region (Global + 4 continent groups).
+   Active filter summary chip + Clear all.
+
+8. WorldMap.tsx: 12×6 CSS Grid heat-tile map; geographic positioning;
+   active tile glow. md+ only; Sidebar handles mobile.
+
+9. App.tsx: React Router v6 (/ and /region/:regionCode). Mobile overlay
+   sidebar with blur backdrop.
+
+
+FAILURES / BLOCKERS
+-------------------
+1. WorldMap is a tile grid, not a real SVG choropleth.
+2. No auth / user sessions.
+3. Category not in URL (ephemeral useState).
+4. No WebSocket / SSE — 5-min polling only.
+
+
+TECHNICAL DEBT
+--------------
+1. Category filter not persisted in URL.
+2. WorldMap tile positions hardcoded in TILES array.
+3. No top-bar progress bar on initial mount.
+4. Mobile sidebar doesn't trap focus (keyboard accessibility gap).
+5. No React ErrorBoundary around NewsGrid.
+6. Vite proxy is dev-only — production needs nginx/Caddy /api rewrite.
+
+================================================================================
+
+
+================================================================================
+  MODULE 5 — SPATIAL VISUALIZATION LAYER (3D GLOBE)
+  Date: 2026-03-13
+================================================================================
+
+SUCCESSES
+---------
+1. Packages: three@0.163.0 (pinned, no ^), @react-three/fiber@8.18.0,
+   @react-three/drei@9.122.0, @types/three@0.163.0 (all exact-pinned).
+   React 18 compatible; no --legacy-peer-deps required after downgrade.
+
+2. geoUtils.ts: latLngToVector3() standard spherical transform.
+   REGION_COORDS: 20 ISO codes → country centroids. regionToVector3()
+   falls back to [0,0] for unknown codes.
+
+3. Earth.tsx: raw <mesh><sphereGeometry/> (not drei Sphere helper).
+   Core (#0f3570 emissive #1a5ccc) + wireframe + atmosphere + rim glow.
+   useFrame drives group rotation; paused prop for interaction freeze.
+
+4. ContinentLines.tsx: TopoJSON decoded inline (no topojson-client dep).
+   world-atlas/countries-110m.json bundled via npm (no CDN runtime fetch).
+   Single THREE.LineSegments batch; color #67e8f9, opacity 0.75.
+
+5. Marker.tsx: pulsing core + halo (sin wave, deterministic phase offset).
+   Per-category CATEGORY_COLORS. Selection torus ring. 7 category colors.
+
+6. HudOverlay.tsx: drei <Html> anchors DOM card to 3D point.
+   Inline styles (not Tailwind) for reliability inside R3F renderer context.
+
+7. NewsBlips.tsx: useMemo for positions. Uses story.latitude/longitude
+   from API (Module 6) when present; falls back to regionToVector3().
+   Single selectedId state; same marker click deselects.
+
+8. GlobeScene.tsx:
+   - Camera z=5.5, fov=45. Stars radius=80 count=4000.
+   - OrbitControls: autoRotate={!cursorOver && !cardOpen} — stops spinning
+     when cursor is over the canvas or a card is open.
+   - cursorOver tracked via onPointerEnter/Leave on the wrapper div.
+
+9. GlobeErrorBoundary.tsx: class component; getDerivedStateFromError
+   shows "Globe failed to load / Retry" — prevents blank screen.
+
+10. App.tsx: GlobeScene React.lazy + Suspense; GlobeErrorBoundary wraps.
+    "Globe on/off" toggle; WorldMap retained as md:hidden mobile fallback.
+
+11. vite.config.ts: manualChunks three-vendor + r3f-vendor.
+    Initial load: ~79 KB JS. Three.js only loads when globe is rendered.
+
+12. Build: 0 TS errors, 0 warnings.
+
+
+FAILURES / BLOCKERS
+-------------------
+Three.js version crashes resolved by pinning three@0.163.0:
+- r170+ removed LinearEncoding and renamed color management APIs that
+  fiber@8 relies on internally → "Cannot read properties of undefined
+  (reading 'S')" crash. Pinning to 0.163.0 fixes this.
+
+
+TECHNICAL DEBT
+--------------
+1. No instanced rendering — 50+ individual Marker draw calls.
+2. No FPS monitor — performance on integrated GPU/mobile untested.
+3. HudOverlay uses inline styles instead of CSS modules.
+4. ContinentLines dataset is 110m resolution (country borders only).
+   True state/province borders addressed in Module 5.1 (StateBorders).
+
+================================================================================
+
+
+================================================================================
+  MODULE 5.1 — CLUTTER RESOLUTION & SPATIAL JITTER
+  Date: 2026-03-14
+================================================================================
+
+SUCCESSES
+---------
+1. Coordinate Jitter (geoUtils.ts — applyJitter)
+   Deterministic tangential offset using Knuth-style integer hash of the
+   story's dedup_group_id seed.
+   - Two pseudo-random angles (a1, a2) derive from seed via separate
+     multipliers (2654435761, 2246822519) so angle axes are independent.
+   - Offset applied along two orthogonal tangent vectors (t1, t2) computed
+     via cross-products with the radial direction — blip stays exactly on
+     the sphere surface at MARKER_RADIUS.
+   - Base magnitude: 0.045 world units (≈ 2.25% of globe radius).
+   - Scales with density: 0.045 + min(density-1, 8) × 0.006 — crowded
+     regions spread further; single-story regions have magnitude = 0
+     (no jitter applied).
+
+2. Density-aware position bucketing (NewsBlips.tsx)
+   Two-pass computation:
+     Pass 1: resolve all base positions (lat/lng or centroid fallback).
+     Pass 2: group by rounded coordinate bucket (2 dp), count per bucket,
+             apply scaled jitter + attach density to each story.
+   HudOverlay receives the jittered position, so the popup aligns exactly
+   with the visual blip.
+
+3. Hover scale-up (Marker.tsx)
+   onPointerEnter/Leave on the 0.12-radius invisible hit sphere.
+   - Hovered core dot: 1.8× baseRadius (vs 1.0× normal, 1.45× selected).
+   - Pulsing halo: additional 1.3× scale multiplier on hover.
+   - stopPropagation on all pointer events prevents camera drag conflicts.
+
+4. Density glow (Marker.tsx)
+   haloBaseOpacity = min(0.85, 0.40 + (density-1) × 0.08)
+   - 1 story  → 0.40 opacity (subtle)
+   - 5 stories → 0.72 opacity (clearly visible cluster)
+   - 10+ stories → 0.85 opacity (maximum glow, capped)
+   Opacity modulated per frame by the sin-wave pulse on top of the base.
+
+5. State/Province reference layer (StateBorders.tsx)
+   Uses world-atlas/countries-50m.json (739 KB raw, ~180 KB gzip).
+   Rendered at GLOBE_RADIUS + 0.008, below ContinentLines (+ 0.012) and
+   above the globe surface — eliminates z-fighting.
+   Material: #ffffff, opacity 0.10, depthWrite: false.
+   Decoded with the same inline TopoJSON arc decoder as ContinentLines.
+   Rendered before ContinentLines in the Earth child order so the cyan
+   country borders visually sit on top of the white reference grid.
+
+6. TypeScript: 0 errors, 0 warnings.
+
+
+FAILURES / BLOCKERS
+-------------------
+1. StateBorders is country-level, not true state/province borders
+   world-atlas provides only country boundaries (even at 50m resolution).
+   True sub-national borders require the Natural Earth admin_1 dataset
+   (~500 KB gzipped as TopoJSON). It is not available as an npm package
+   suitable for offline bundling without a build-step download.
+   The 50m layer provides a denser geographic grid than 110m but does not
+   show individual US states, Indian states, etc.
+
+2. Jitter is uniform across all categories and regions
+   A fixed magnitude does not account for the geographic size of the region.
+   A small region (Israel, South Korea) disperses blips outside its borders
+   at max density. Clamping magnitude to a region-specific bound would
+   require a per-region radius lookup table.
+
+
+TECHNICAL DEBT
+--------------
+1. Density bucket uses fixed 2 dp rounding
+   Two stories with slightly different lat/lng that round to the same bucket
+   get jitter but are not counted together for glow purposes. A spatial grid
+   with configurable cell size would be more accurate.
+
+2. Hover state causes re-render on every pointer move
+   useState in a memoized R3F component triggers reconciliation on enter/leave.
+   For >100 markers, useRef + direct material mutation (bypassing React) would
+   be cheaper.
+
+3. StateBorders geometry is computed once at module load.
+   This is fine for the current 1.5 MB dataset. The 10m dataset (3.5 MB+)
+   would need a Web Worker decode step.
+
+================================================================================
+
+
+================================================================================
+  MODULE 5.2 — HIGH-RESOLUTION ADMINISTRATIVE BOUNDARIES
+  Date: 2026-03-14
+================================================================================
+
+SUCCESSES
+---------
+1. Dataset — Natural Earth 50m Admin-1 (filtered)
+   Source: nvkelso/natural-earth-vector ne_50m_admin_1_states_provinces.geojson
+   Filtered to OmnesVident's 20 covered countries; minified JSON.
+   Saved to: frontend_portal/src/data/ne_admin1_110m.json
+   Raw size: 1.5 MB (within 2 MB limit) / ~380 KB gzip.
+
+2. Coverage — 7 of 20 countries with real sub-national borders
+   US: 51 states/territories
+   IN: 36 states/union territories
+   CN: 31 provinces/municipalities
+   BR: 27 states
+   CA: 13 provinces/territories
+   ZA:  9 provinces
+   AU:  9 states/territories
+   Total: 176 features with actual admin-1 geometry.
+   Remaining 13 countries (GB, DE, FR, IT, UA, JP, KR, IL, SA, EG, MX, AR, NG)
+   still use the ContinentLines country-level layer as reference.
+
+3. StateBorders.tsx — GeoJSON polygon ring renderer
+   Renders exterior + interior rings from Polygon and MultiPolygon features.
+   Material: #ffffff, opacity 0.15, depthWrite: false.
+   Positioned at GLOBE_RADIUS + 0.007 (below ContinentLines at +0.012).
+   No runtime fetch — bundled at build time via Vite JSON import.
+
+4. Visual hierarchy maintained
+   GLOBE_RADIUS + 0.007 → white state lines (opacity 0.15)
+   GLOBE_RADIUS + 0.008 → (removed; StateBorders now owns this layer)
+   GLOBE_RADIUS + 0.012 → cyan country lines (opacity 0.75)
+   GLOBE_RADIUS + 0.04  → blip markers
+
+5. TypeScript: 0 errors, 0 warnings.
+
+
+FAILURES / BLOCKERS
+-------------------
+1. 13 of 20 covered countries have no sub-national border data
+   The Natural Earth 50m admin_1 dataset only includes subdivisions for large
+   countries visible at 50m cartographic scale. Smaller countries (GB, DE, FR,
+   JP, KR, IL, SA, EG, MX, AR, NG, UA, IT) are absent.
+   The 10m admin_1 dataset (~6 MB uncompressed) covers all countries but
+   exceeds the 2 MB bundling threshold.
+
+2. No npm package provides global admin_1 data offline
+   visionscarto-world-atlas, world-atlas, us-atlas, and topojson-server all
+   lack a global state/province dataset suitable for npm bundling.
+   The data had to be fetched from a GitHub raw URL and committed as a static
+   asset.
+
+
+TECHNICAL DEBT
+--------------
+1. Full global admin_1 coverage requires the Natural Earth 10m dataset (~6 MB)
+   Mitigation: split into per-continent chunks loaded on demand, or use a
+   Web Worker for parse + geometry build off the main thread.
+
+2. The static JSON asset is committed to git
+   It should be downloaded during a build step (e.g., postinstall script in
+   package.json) rather than checked in, to avoid re-committing if the upstream
+   source is updated.
+
+3. Polygon rings include both exterior and interior rings (holes)
+   Interior rings (e.g., enclaves) generate extra line segments that correctly
+   show island/enclave borders but slightly increase geometry count.
+
+================================================================================
+
+
+================================================================================
+  MODULE 6 — GEO-INTELLIGENCE & COORDINATE MAPPING
+  Date: 2026-03-14
+================================================================================
+
+OVERVIEW
+--------
+Adds precise WGS84 lat/lng to every enriched story. Coordinates flow from
+the Intelligence Layer through the API response to the globe, enabling
+blips at state/province resolution rather than country centroids.
+
+
+FILES CREATED
+-------------
+intelligence_layer/geo_data_cache.json
+  Offline lookup: { "ISO-3166-2 code": [lat, lng] }
+  901 entries across 20 countries, extracted from iso3166-2 package.
+  Regenerate: python -m intelligence_layer.scripts.export_geo
+
+intelligence_layer/geo_resolver.py
+  GeoResolver.get_coordinates(country_code, region_name) waterfall:
+    1. Exact ISO 3166-2 code in cache        ("US-TX")
+    2. Name normalisation → _NAME_TO_CODE    ("Texas" → "US-TX")
+    3. Country centroid fallback             ("US" → [37.09, -95.71])
+    4. None if country unknown
+  150+ name/city variants in _NAME_TO_CODE for all 20 countries.
+  Cache loaded once at IntelligencePipeline construction; stateless.
+
+intelligence_layer/scripts/export_geo.py
+  Iterates iso.Subdivisions().all (structure: {country: {code: attrs}})
+  and extracts attrs["latLng"] for COVERED_COUNTRIES.
+
+
+FILES MODIFIED
+--------------
+intelligence_layer/models.py   — latitude/longitude Optional[float] fields
+intelligence_layer/pipeline.py — GeoResolver in __init__(); coords resolved
+                                  per story in process()
+api_storage/database.py        — latitude/longitude nullable FLOAT columns
+api_storage/schemas.py         — latitude/longitude in StoryOut response
+api_storage/repository.py      — coords persisted in save_stories()
+frontend_portal/src/services/api.ts          — StoryOut type: lat/lng fields
+frontend_portal/src/components/visualizer/NewsBlips.tsx
+                               — uses latLngToVector3(story.latitude,
+                                 story.longitude) when present; falls back
+                                 to regionToVector3(region_code)
+
+
+SUBDIVISION COUNTS
+------------------
+901 real WGS84 centroids from iso3166-2 (vs 466 hand-curated previously).
+
+
+SMOKE-TEST RESULTS — 11/11 PASSED
+-----------------------------------
+US/Texas      → (31.2639, -98.5456)
+IN/Maharashtra → (19.567, 76.4165)
+GB/Scotland   → (56.7861, -4.1141)
+DE/Bavaria    → (48.9468, 11.4039)
+JP/Tokyo      → (35.6769, 139.7639)
+AU/Victoria   → (-36.5986, 144.678)
+CN/Beijing    → (40.1906, 116.4121)
+ZA/Gauteng    → centroid fallback (-30.56, 22.94)
+US/US-TX      → (31.2639, -98.5456)  [direct ISO code passthrough]
+BR/(none)     → (-14.24, -51.93)     [country centroid fallback]
+XX/(none)     → None                  [unknown country]
+
+
+DATABASE MIGRATION (existing deployments)
+------------------------------------------
+  ALTER TABLE story_record ADD COLUMN latitude  REAL;
+  ALTER TABLE story_record ADD COLUMN longitude REAL;
+
+
+FAILURES / BLOCKERS
+-------------------
+1. Heatmap stacking for co-located stories works by design (identical
+   region_code → identical coordinates → blips overlay). The stacking
+   glow effect is CSS/shader work for a future iteration.
+
+2. _NAME_TO_CODE is hand-curated — cities/states not in the 150+ list
+   fall through to country centroid. Coverage is adequate for the 20
+   current regions but not exhaustive.
+
+
+TECHNICAL DEBT
+--------------
+1. GeoResolver only maps stories to their primary region_code. Stories
+   mentioning a foreign state (e.g., "clash in Texas" in a GB article)
+   are not resolved to the subdivision level for mentioned_regions.
+
+2. No Alembic migration — schema changes require manual ALTER TABLE or
+   dropping the DB file.
+
+3. iso3166-2 package has ~5,046 subdivisions globally; only 20 countries
+   are currently exported. Expanding COVERED_COUNTRIES and re-running
+   export_geo.py is the only change needed to add more regions.
+
+================================================================================
+
+
+================================================================================
+  MODULE 6.5 — STATE-SPECIFIC INGESTION
+  Date: 2026-03-14
+================================================================================
+
+OVERVIEW
+--------
+Adds city-to-state text scanning and state-level ingestion providers so that
+stories mentioning a known city are pinpointed to the correct subdivision rather
+than the country centroid. Clusters of 5+ stories in the same state glow
+brighter on the globe via MeshStandardMaterial emissiveIntensity.
+
+
+FILES CREATED
+-------------
+intelligence_layer/geo_tagger.py
+  tag_with_state(title, snippet) → Optional[ISO 3166-2 code]
+  CITY_TO_STATE dict: 130+ cities across US, IN, CN, BR, CA, AU, ZA.
+  _LOWER_MAP: pre-computed lower-case keys for case-insensitive scan.
+  Matching: first city found in "title + ' ' + snippet" wins.
+
+
+FILES MODIFIED
+--------------
+intelligence_layer/pipeline.py
+  - Imports geo_tagger.tag_with_state.
+  - New priority order for coordinate resolution:
+      1. City mention in text (geo_tagger) → subdivision centroid via GeoResolver
+      2. region_code already ISO 3166-2 (contains "-") → direct lookup
+      3. Country-only code → country centroid fallback
+
+ingestion_engine/providers/newsdata_io.py
+  - __init__: optional subdivision param (e.g. "US-CA").
+  - fetch(): adds region=<subdivision>.lower() to live API params when set.
+  - _parse(): uses subdivision as region_code when set.
+  - _STATE_MOCK_POOL: 18 city-embedded headlines (one per major subdivision)
+    so geo_tagger resolves them to correct state in mock mode.
+  - _mock_events(): delegates to _mock_state_events() when subdivision set.
+  - _mock_state_events(): selects one state-pool headline deterministically
+    by sum-of-chars hash of the subdivision code.
+
+ingestion_engine/main.py
+  - HIGH_RES_SUBDIVISIONS list: 26 state/province codes across 7 countries.
+      US: CA TX NY FL WA  |  IN: MH DL KA TN WB  |  CN: BJ SH GD SC HB
+      BR: SP RJ MG CE BA  |  CA: ON BC QC AB      |  AU: NSW VIC QLD WA
+      ZA: GT WC KZN
+  - main(): adds one NewsDataProvider per subdivision after country providers.
+
+frontend_portal/src/components/visualizer/Marker.tsx
+  - Core dot changed from meshBasicMaterial → meshStandardMaterial.
+  - emissive = category colour.
+  - emissiveIntensity = min(2.5, max(0, (regionCount - 5) × 0.3))
+    → activates at density 6+ stories; peaks at ~13 stories.
+  - Density 1–5: emissiveIntensity = 0 (no glow — baseline appearance).
+  - Density  6:  emissiveIntensity ≈ 0.3
+  - Density 13+: emissiveIntensity = 2.5 (maximum glow)
+
+
+INGESTION VOLUME AFTER 6.5
+---------------------------
+Before: 20 country providers + 2 RSS feeds = 40–42 mock events per run.
+After:  20 country + 26 subdivision + 2 RSS = 66–68 events before dedup.
+State-level events are geo-tagged at the subdivision centroid; country-level
+events fall through to country centroid unless the text mentions a city.
+
+
+CITY COVERAGE
+-------------
+US (24 cities), IN (20 cities), CN (20 cities), BR (17 cities),
+CA (14 cities), AU (14 cities), ZA (11 cities) = 120 cities total.
+
+
+FAILURES / BLOCKERS
+-------------------
+1. Mock state headlines are hash-bucketed, not matched 1:1 to subdivision
+   State mock events use a deterministic offset into _STATE_MOCK_POOL which
+   may not embed a city for that exact subdivision. In live API mode, real
+   articles will contain city names and geo_tagger will fire correctly.
+
+2. geo_tagger matches the first city found — not the most prominent
+   A story about "a meeting in Austin covered by Dallas press" will match
+   Austin even if Dallas is the subject. A TF-IDF–weighted or NLP approach
+   would be more accurate.
+
+
+TECHNICAL DEBT
+--------------
+1. CITY_TO_STATE covers 7 of 20 countries
+   The 13 countries without high-res admin data (GB, DE, FR, IT, UA, JP, KR,
+   IL, SA, EG, MX, AR, NG) have no city entries and fall through to country
+   centroid. Adding entries for those countries requires only updating the dict.
+
+2. City names are matched as substrings
+   "Washington" matches both "Washington, D.C." and "Washington state".
+   A disambiguation step (check neighbouring words) would prevent this.
+
+================================================================================
+
+
+================================================================================
+  MODULE 6.8 — REGIONAL FEED INJECTION
+  Date: 2026-03-14
+================================================================================
+
+OVERVIEW
+--------
+Formalises sub-national ingestion into a rotating batch system, promotes
+geo_tagger to a first-class TagEnhancer class that writes back to region_code,
+and adds a State Focus bar to the globe that dims blips outside the selected state.
+
+
+FILES CREATED
+-------------
+ingestion_engine/regions_to_track.json
+  Human-readable config: 7 countries × their key subdivisions (44 total).
+  Structure: { "US": [{code: "US-CA", name: "California"}, …], … }
+
+
+FILES MODIFIED
+--------------
+intelligence_layer/geo_tagger.py
+  - CITY_TO_STATE expanded: 300+ cities across 7 countries
+    (was 120; expanded every country 2–3×).
+  - TagEnhancer class:
+      tag(title, snippet) → Optional[str]   — wraps tag_with_state()
+      enhance(lead: NewsEvent) → (NewsEvent, Optional[str])
+        Returns model_copy(update={"region_code": sub}) when city found,
+        so downstream dedup + API region filter operate at subdivision level.
+
+intelligence_layer/pipeline.py
+  - Imports TagEnhancer (replaces bare tag_with_state import).
+  - __init__: self._tagger = TagEnhancer()
+  - process(): calls self._tagger.enhance(cluster.lead) as first step;
+    uses returned (lead, city_sub) for both region_code update and coordinates.
+
+ingestion_engine/core/manager.py
+  - run() gains optional sub_national, batch_size=6, cycle=0 params.
+  - Slices sub_national[(cycle×batch_size) % n : +batch_size] each run.
+  - Logs batch start index, cycle, and pool size.
+
+ingestion_engine/main.py
+  - Added import time.
+  - Separates sub_national list from regular providers list.
+  - cycle = int(time.time()) // 300  — rotates every 5 minutes.
+  - Calls manager.run(sub_national=sub_national, batch_size=6, cycle=cycle).
+
+frontend_portal/src/components/visualizer/GlobeScene.tsx
+  - Added useEffect import.
+  - FOCUS_STATES: Record<country, [{code, name}]> — 7 entries, 42 states.
+  - StateFocusBar component: "State Focus:" label + "All" + state code buttons.
+    Visible only when region prop is one of the 7 high-res countries.
+  - focusState state; useEffect resets to null on region change.
+  - Passes focusState to NewsBlips.
+
+frontend_portal/src/components/visualizer/NewsBlips.tsx
+  - focusState?: string | null prop.
+  - dimmed={focusState != null && story.region_code !== focusState} per Marker.
+
+frontend_portal/src/components/visualizer/Marker.tsx
+  - dimmed?: boolean prop (default false).
+  - alpha = dimmed ? 0.12 : 1.
+  - Hit sphere omitted when dimmed (no click/hover on ghost markers).
+  - Core dot: transparent + opacity=alpha; emissiveIntensity=0 when dimmed.
+  - Halo: useFrame multiplies animated opacity by alpha (crucial — JSX
+    initial value is overwritten every frame by the animation loop).
+  - Selection ring hidden when dimmed.
+
+
+BATCH ROTATION EXAMPLE (26 providers, batch_size=6)
+----------------------------------------------------
+  cycle 0  → indices 0–5   (US-CA TX NY FL WA, IN-MH)
+  cycle 1  → indices 6–11  (IN-DL KA TN WB, CN-BJ SH)
+  cycle 4  → indices 24–3  (ZA-KZN, US-CA TX NY FL WA) [wraps]
+Per run: 20 country + 6 sub-national + 2 RSS = 28 providers active.
+
+
+FAILURES / BLOCKERS
+-------------------
+1. TagEnhancer runs after deduplicate()
+   Cluster grouping uses original region_code; enhance() updates a copy.
+   Two stories about the same event with region_code "US" and "US-CA"
+   may survive dedup as separate stories. Fix: run TagEnhancer before dedup.
+
+2. State Focus dims by region_code match, not by coordinates
+   A country-level story (region_code="US") near a focused state's
+   centroid is still dimmed. Coordinate-in-bounding-box filtering would
+   be more accurate.
+
+
+TECHNICAL DEBT
+--------------
+1. regions_to_track.json is informational only
+   main.py uses the hardcoded HIGH_RES_SUBDIVISIONS list; a future refactor
+   could load regions_to_track.json at startup to drive that list.
+
+2. State codes in the focus bar are abbreviated (e.g. "CA", "NSW")
+   A title="" tooltip could show full names without widening the bar.
+
+================================================================================
+
+
+================================================================================
+  MODULE 7.2 — CRITICAL PIPELINE FIX & LOCAL DENSITY
+  Date: 2026-03-14
+================================================================================
+
+DOCTRINE: "LOCAL-FIRST"
+-----------------------
+Sub-national resolution must precede deduplication. A story about a Tamil Nadu
+LPG subsidy must cluster with other Tamil Nadu stories — not with generic "IN"
+national stories that happen to share a headline phrase.
+
+
+A. PIPELINE INVERSION (intelligence_layer/pipeline.py)
+-------------------------------------------------------
+Old flow: Fetch → Deduplicate → TagEnhancer (too late — wrong clusters)
+New flow: Fetch → TagEnhancer → Deduplicate → GeoResolve
+
+Changes:
+- process(): tagged = [self._tagger.enhance(e)[0] for e in events]  (all raw events)
+- deduplicate(tagged) instead of deduplicate(events)
+- Per-cluster loop no longer calls enhance() — region_code already updated
+- Logs count of events whose region_code was changed by tagging
+- Coords resolution simplified: just check "-" in rc, no city_sub branch needed
+
+
+B. HIGH-INTENSITY INGESTION
+----------------------------
+ingestion_engine/main.py
+  - ALWAYS_ON_SUBDIVISIONS: IN-TN, IN-MH, US-CA, US-TX, US-NY
+    (polled every cycle, not rotated)
+  - HIGH_RES_SUBDIVISIONS: remaining 21 subdivisions (rotated, batch_size=6)
+  - always_on=[] and sub_national=[] kept separate; manager receives both
+
+ingestion_engine/core/manager.py
+  - run() gains always_on: Optional[List[BaseProvider]] param
+  - always_on providers always extend active list before rotating batch
+  - Logs always-on count separately
+
+ingestion_engine/providers/newsdata_io.py
+  - Regional fetches (subdivision set) now add category=top,business,politics
+    so utility/subsidy news isn't filtered by the default national "top" filter
+  - _STATE_MOCK_POOL expanded to 20 entries:
+    - Index 18: "Tamil Nadu LPG subsidy extended to rural districts"
+      (mentions Chennai, Madurai, Coimbatore, Tiruchirappalli — all IN-TN)
+    - IN-TN hash: sum("IN-TN") = 358; 358 % 20 = 18 → this entry is picked
+
+
+C. NULL ISLAND SAFETY NET (intelligence_layer/geo_resolver.py)
+---------------------------------------------------------------
+- _NAME_TO_CODE expanded for India (was the primary gap):
+    Tamil Nadu: madurai, coimbatore, salem, tiruchirappalli, trichy, tiruppur,
+                vellore, erode, thoothukudi, tuticorin, tirunelveli, thanjavur,
+                tiruvannamalai, karur, dindigul, cuddalore, madras
+    Maharashtra: pune, nagpur, nashik, aurangabad, solapur, kolhapur, thane
+    Karnataka:   mysuru, mysore, mangaluru, hubli
+    Kerala:      thiruvananthapuram, kochi, kozhikode, thrissur
+    Gujarat:     surat, vadodara, rajkot
+    UP:          lucknow, kanpur, varanasi, agra, prayagraj, allahabad, meerut, noida
+    West Bengal: calcutta, howrah, durgapur
+    And more across all Indian states + Chandigarh, Srinagar, Dehradun
+- Step 3 (country centroid fallback) now applies deterministic ±3° scatter
+  when region_name was provided but unresolvable:
+    seed = sum(ord(c) for c in region_name.upper())
+    lat_off = (seed * 1103515245 & 0xFFFF) / 0xFFFF * 6 - 3
+    lng_off = (seed * 22695477 + 0x3039 & 0xFFFF) / 0xFFFF * 6 - 3
+  → Prevents Null Island (0,0) and stops unresolved stories stacking on centroid
+
+
+D. VISUAL HOTSPOTTING (Marker.tsx + NewsBlips.tsx)
+----------------------------------------------------
+Marker.tsx
+  - emissiveIntensity threshold lowered:
+    OLD: min(2.5, max(0, (regionCount - 5) × 0.3))  → activates at 6+
+    NEW: min(2.5, max(0, (regionCount - 1) × 0.5))  → activates at 2+
+    Density 2 → intensity 0.5;  Density 6 → intensity 2.5 (max)
+  - renderOrder prop added (default 1); applied to the <group> element
+
+NewsBlips.tsx
+  - Passes renderOrder={story.region_code.includes("-") ? 2 : 1} to each Marker
+  - Sub-national blips (region_code contains "-") always render on top of
+    same-centroid national blips
+
+
+TEST CASE VERIFICATION — "LPG Subsidy / Chennai"
+-------------------------------------------------
+Mock mode (IN-TN provider, cycle where IN-TN is in always-on):
+  1. NewsDataProvider(country="in", subdivision="IN-TN")._mock_state_events()
+     → picks _STATE_MOCK_POOL[18]: Tamil Nadu LPG subsidy (Chennai/Madurai/etc.)
+  2. TagEnhancer.enhance(): "Chennai" found → already IN-TN (no change needed)
+  3. deduplicate([...IN-TN event...]): forms distinct cluster (not merged with "IN")
+  4. GeoResolver.get_coordinates("IN", "IN-TN"): finds IN-TN in cache → Tamil Nadu centroid
+  5. EnrichedStory: latitude≈10.5, longitude≈78.5 → blip in Tamil Nadu ✓
+  6. Marker renderOrder=2 (sub-national) → visible above any "IN" country blip ✓
+  7. emissiveIntensity activates at 2+ stories → 2 IN-TN stories → glow visible ✓
+
+
+FAILURES / BLOCKERS
+-------------------
+None blocking. The pipeline inversion resolves the dedup-clustering issue
+described in Module 6.8 FAILURES/1.
+
+
+TECHNICAL DEBT
+--------------
+1. ±3° Null Island scatter is geographic — may place blips in oceans
+   near coastal countries (e.g. an unknown Indian subdivision could scatter
+   into the Bay of Bengal). A land-mask check would prevent this.
+
+2. The tagged-before-dedup flow means two stories about the same event
+   in different cities (one mentioning "Mumbai", one "Pune") will form
+   separate IN-MH clusters even though they are the same story.
+   TF-IDF similarity + location-aware dedup would fix this.
+
+================================================================================
+
+
+================================================================================
+  MODULE 8.0 — NEWSCATCHER API INTEGRATION (HYPER-LOCAL SECONDARY PROVIDER)
+  Date: 2026-03-14
+================================================================================
+
+OBJECTIVE
+---------
+Integrate NewsCatcher API v2 as a high-precision secondary provider to increase
+sub-national news density, specifically targeting long-tail local stories that
+generic country-level aggregators miss (local digital papers, city portals,
+regional news wires).
+
+
+SUCCESSES
+---------
+
+A. NewsCatcherProvider (ingestion_engine/providers/newscatcher_provider.py)
+---------------------------------------------------------------------------
+Class inherits BaseProvider. Key design choices:
+
+  Constructor params:
+    country          — ISO alpha-2 (e.g. "IN", "US")
+    subdivision      — ISO 3166-2 (e.g. "IN-TN") — sets region_code on events
+    query_keywords   — city/region names joined as "Chennai OR Madurai" in q=
+    topic            — mapped via _TOPIC_MAP to NewsCatcher's slug (default "news")
+    page_size        — default 50 (max 100)
+
+  Authentication: x-api-key header (NEWSCATCHER_API_KEY env var; falls back to mock)
+
+  Endpoint: GET https://api.newscatcherapi.com/v2/search
+  Params:   q, countries, topic, page_size, lang=en
+
+  Field mapping:
+    article.title          → strip_html → NewsEvent.title
+    article.excerpt|summary → clean_and_truncate → NewsEvent.snippet
+    article.link           → NewsEvent.source_url
+    article.clean_url      → NewsEvent.source_name
+    article.published_date → _parse_dt ("YYYY-MM-DD HH:MM:SS") → NewsEvent.timestamp
+    subdivision or country  → NewsEvent.region_code
+
+  Date parsing: primary format "%Y-%m-%d %H:%M:%S" (UTC assumed); falls back to
+  fromisoformat for ISO 8601 variants.
+
+B. Mock Data Pool (_SUBDIVISION_MOCK)
+--------------------------------------
+16 hyper-local mock stories, one per key subdivision, deliberately distinct from
+NewsData.io's _STATE_MOCK_POOL to simulate the long-tail sourcing advantage:
+
+  IN-TN  → Chennai Metro Phase 3 tender (thehindu.com)
+  IN-MH  → Mumbai Coastal Road opening (hindustantimes.com)
+  IN-DL  → Delhi odd-even scheme extension (ndtv.com)
+  IN-KA  → Bengaluru Cauvery Stage 5 expansion (deccanherald.com)
+  IN-WB  → Kolkata flyover inspection (telegraphindia.com)
+  US-CA  → LA wildfire recovery housing fund (latimes.com)
+  US-TX  → Houston Ship Channel chemical spill (houstonchronicle.com)
+  US-NY  → New York MTA congestion pricing (nytimes.com)
+  US-FL  → Miami-Dade seawall federal funding (miamiherald.com)
+  US-WA  → Seattle SR-99 tunnel milestone (seattletimes.com)
+  CN-BJ  → Beijing AI traffic management (chinadaily.com.cn)
+  CN-SH  → Shanghai free-trade zone data rules (shine.cn)
+  BR-SP  → São Paulo Metro Line 6 tunnel (folha.uol.com.br)
+  BR-RJ  → Rio carnival sambadrome capacity (oglobo.globo.com)
+  ZA-GT  → Johannesburg Eskom load-shedding (dailymaverick.co.za)
+  ZA-WC  → Cape Town desalination upgrade (groundup.org.za)
+
+C. Pipeline Integration (ingestion_engine/main.py)
+----------------------------------------------------
+NEWSCATCHER_ALWAYS_ON dict: 16 subdivisions × city keyword lists.
+NewsCatcherProvider instances added to main `providers` list (run every cycle,
+in parallel with NewsData.io country feeds and RSS via asyncio.gather).
+
+  "IN-TN": ["Chennai", "Madurai", "Coimbatore", "Tamil Nadu"]
+  "IN-MH": ["Mumbai", "Pune", "Nagpur", "Maharashtra"]
+  "IN-DL": ["Delhi", "New Delhi"]
+  "IN-KA": ["Bengaluru", "Bangalore", "Karnataka"]
+  "IN-WB": ["Kolkata", "West Bengal"]
+  "US-CA": ["Los Angeles", "San Francisco", "California"]
+  "US-TX": ["Houston", "Dallas", "Texas"]
+  "US-NY": ["New York", "Manhattan", "Brooklyn"]
+  "US-FL": ["Miami", "Orlando", "Florida"]
+  "US-WA": ["Seattle", "Washington state"]
+  "CN-BJ": ["Beijing"]
+  "CN-SH": ["Shanghai"]
+  "BR-SP": ["São Paulo", "Sao Paulo"]
+  "BR-RJ": ["Rio de Janeiro"]
+  "ZA-GT": ["Johannesburg", "Pretoria", "Gauteng"]
+  "ZA-WC": ["Cape Town", "Western Cape"]
+
+D. Provider Export (ingestion_engine/providers/__init__.py)
+------------------------------------------------------------
+NewsCatcherProvider added to __all__ alongside BaseProvider, NewsDataProvider,
+RSSProvider.
+
+E. "Chennai" Test Case Verification (Mock Mode)
+------------------------------------------------
+Mock cycle for IN-TN with NewsCatcher:
+  1. NewsCatcherProvider(country="in", subdivision="IN-TN", query_keywords=[...])
+     → _mock_events() → _SUBDIVISION_MOCK["IN-TN"]:
+       "Chennai Metro Phase 3 tender awarded to L&T Construction"
+       source_name="thehindu.com"  region_code="IN-TN"
+  2. NewsData.io IN-TN (always-on): "Tamil Nadu LPG subsidy extended..."
+     → These are two distinct stories (different title hash → different dedup_group_id)
+  3. TagEnhancer: both already have region_code="IN-TN" → no change needed
+  4. deduplicator: two separate IN-TN clusters (Chennai Metro ≠ LPG subsidy)
+  5. GeoResolver: both resolve to IN-TN centroid (11.33, 78.61)
+  6. Result: 2 unique IN-TN blips at Tamil Nadu on the globe, both from
+     different sources (newscatcher + newsdata) — local density increased ✓
+
+  Unique NewsCatcher stories not in NewsData.io feed (mock mode): 16
+  (one per NEWSCATCHER_ALWAYS_ON subdivision)
+
+
+FAILURES / BLOCKERS
+-------------------
+None. Provider is fully functional in mock mode; live API requires
+NEWSCATCHER_API_KEY env var.
+
+
+TECHNICAL DEBT
+--------------
+1. query_keywords uses simple OR join — no proximity operators or phrase
+   matching. "New York" as two keywords could match unrelated stories
+   mentioning "New" and "York" independently. Quoting multi-word keywords
+   ("\"New York\"") would improve precision.
+
+2. topic is fixed at provider construction. For a single subdivision, the
+   dominant category isn't known at init time. A future enhancement could
+   run two fetches per subdivision: one with topic="politics" and one with
+   topic="business" to maximise category diversity.
+
+3. NewsCatcher v2 has a 1 req/sec rate limit on the free tier. The current
+   parallel asyncio.gather approach could breach this; a semaphore-based
+   rate limiter in IngestionManager would be the correct fix.
+
+================================================================================
+  MODULE 9.5 — LEXICON EXPLOSION & REGIONAL MAPPING
+  Date: 2026-03-14
+================================================================================
+
+OBJECTIVE
+---------
+Increase news density at sub-national resolution by expanding city-to-subdivision
+dictionaries. Stories previously defaulting to national centroids (e.g. region_code
+"IN") are now claimed by the correct state/province (e.g. "IN-TN").
+
+FILES CHANGED
+-------------
+1. intelligence_layer/geo_tagger.py  — CITY_TO_STATE + pattern compiler
+2. intelligence_layer/geo_resolver.py — _NAME_TO_CODE
+
+LEXICON SIZE (After Module 9.5)
+--------------------------------
+  Total CITY_TO_STATE entries : 495  (+195 vs Module 7.5 baseline of ~300)
+  ─────────────────────────────────────────────────────────────
+  Country  │  Cities
+  ─────────┼──────────────────────────────────────────────────
+  US       │  177 cities across all 50 states + DC
+  IN       │  140 cities across 28 states/UTs
+  BR       │   45 cities
+  CN       │   44 cities
+  CA       │   36 cities
+  AU       │   28 cities
+  ZA       │   25 cities
+  ─────────────────────────────────────────────────────────────
+
+BEFORE vs AFTER — Key Subdivisions
+------------------------------------
+  Subdivision │  Before │  After  │  Net New Cities
+  ────────────┼─────────┼─────────┼────────────────
+  IN-TN       │    6    │   33    │  +27
+  IN-MH       │    9    │   24    │  +15
+  IN-KA       │    6    │   21    │  +15
+  IN-WB       │    5    │   14    │   +9
+  US-TX       │   15    │   30    │  +15
+  US-FL       │    9    │   21    │  +12
+  US-CA       │   15    │   35    │  +20
+  ────────────────────────────────────────────────
+
+NEW CITIES ADDED (Selected highlights)
+---------------------------------------
+IN-TN: Tirunelveli, Erode, Vellore, Thoothukudi/Tuticorin, Thanjavur,
+       Dindigul, Tiruvannamalai, Cuddalore, Karur, Nagercoil, Kumbakonam,
+       Sivakasi, Pollachi, Hosur, Ambattur, Tambaram, Kanchipuram,
+       Rajapalayam, Sriperumbudur, Villupuram, Namakkal, Pudukkottai,
+       Virudhunagar, Tirupur (alias), Trichy (alias), Madras (alias)
+
+IN-MH: Amravati, Akola, Ahmednagar, Satara, Sangli, Latur, Jalgaon, Dhule,
+       Ulhasnagar, Bhiwandi, Panvel, Malegaon, Nanded, Osmanabad, Wardha
+
+IN-KA: Belagavi/Belgaum, Davanagere, Ballari/Bellary, Shimoga/Shivamogga,
+       Tumkur, Bidar, Raichur, Udupi, Gulbarga/Kalaburagi, Hassan,
+       Hubballi-Dharwad (multi-word form)
+
+IN-WB: Kharagpur, Bardhaman/Burdwan, Haldia, Malda, Jalpaiguri, Kalyani,
+       Barasat, Raiganj
+
+US-TX: McAllen, Killeen, Frisco, Waco, Beaumont, Midland, Odessa, Abilene,
+       Brownsville, Denton, Round Rock, McKinney, Carrollton, Mesquite
+
+US-FL: Port St. Lucie, Pembroke Pines, Cape Coral, Lakeland, Clearwater,
+       West Palm Beach, Coral Springs, Miramar, Pompano Beach, Fort Myers,
+       Daytona Beach, Palm Bay
+
+US-CA: Modesto, Fontana, Moreno Valley, Glendale, Huntington Beach,
+       Santa Clarita, Garden Grove, Oceanside, Rancho Cucamonga, Elk Grove,
+       Hayward, Lancaster, Palmdale, Salinas, Sunnyvale, Pomona, Escondido,
+       Torrance, Santa Rosa, Fremont
+
+ACCURACY IMPROVEMENTS
+----------------------
+A. Country-lock  : unchanged (carried from Module 7.5)
+B. Title-first   : unchanged (carried from Module 7.5)
+C. Word-boundary : unchanged (carried from Module 7.5)
+D. Multi-word priority (NEW in 9.5):
+   Pattern lists per country are now sorted by pattern length descending at
+   import time. "Navi Mumbai" is evaluated before "Mumbai", "Rancho Cucamonga"
+   before "Cucamonga", "Hubballi-Dharwad" before "Dharwad". Prevents the
+   single-word component claiming a story that should go to the more specific
+   composite city.
+   Implementation: _CITY_PATTERNS_BY_COUNTRY[k].sort(key=lambda p: len(p[0].pattern), reverse=True)
+
+TECHNICAL NOTES
+---------------
+- _NAME_TO_CODE in geo_resolver.py expanded in parallel so coordinate lookups
+  (Step 2 of the waterfall) match the same expanded vocabulary as the tagger.
+- Alias entries (Tuticorin = Thoothukudi, Burdwan = Bardhaman, Bellary = Ballari,
+  Belgaum = Belagavi, Mysore = Mysuru) ensure legacy spellings found in older
+  wire stories are also resolved.
+
+================================================================================
+================================================================================
+================================================================================
+  MODULE 10.0 — THE ROUTING ENGINE
+  Date: 2026-03-14
+================================================================================
+
+OBJECTIVE
+---------
+Distribute API load across specialist providers by routing geographic sectors
+to the API best suited to cover them, while respecting free-tier daily/monthly
+limits via a Token Bucket scheduler with automatic failover.
+
+FILES CREATED
+-------------
+  ingestion_engine/core/scheduler.py            — TokenBucket + RequestScheduler
+  ingestion_engine/providers/gnews_provider.py  — GNews API (US/CA)
+  ingestion_engine/providers/worldnews_provider.py — World News API (India)
+  ingestion_engine/providers/mediastack_provider.py — Mediastack (EU/UK)
+  ingestion_engine/factory.py                   — ProviderFactory + routing logic
+
+FILES UPDATED
+-------------
+  ingestion_engine/core/manager.py              — Added ProviderRouter class
+  ingestion_engine/providers/__init__.py         — Exports 3 new provider classes
+  ingestion_engine/main.py                      — factory.build_all() wired in
+
+ROUTING TABLE
+-------------
+  Country(s)              | Assigned Tier    | Free Tier Limit
+  ------------------------+------------------+--------------------
+  US, CA, MX              | GNews API        | 100 req / day
+  IN (all subdivisions)   | World News API   | 1,500 req / month
+  GB, DE, FR, IT, UA,     | Mediastack       | 500 req / month
+    ES, NL, PL, SE        |                  |
+  All others (AR, BR, JP, | NewsData.io      | 200 req / day
+    CN, AU, KR, ZA ...)   | (baseline)       | (existing)
+
+DISTRIBUTED REQUEST COUNTS (4 API keys tracked)
+------------------------------------------------
+  Env var               | Provider tier | Capacity | Period
+  ----------------------+---------------+----------+---------
+  GNEWS_API_KEY         | gnews         | 100      | daily
+  WORLDNEWS_API_KEY     | worldnews     | 1,500    | monthly
+  MEDIASTACK_API_KEY    | mediastack    | 500      | monthly
+  NEWSDATA_API_KEY      | newsdata      | 200      | daily
+  NEWSCATCHER_API_KEY   | newscatcher   | 10,000   | monthly
+
+TOKEN BUCKET (scheduler.py)
+----------------------------
+- Tracks: capacity, period (daily/monthly), consumed count, period_start.
+- Period rollover auto-detected on every consume()/can_consume() call.
+- State persisted atomically to ingestion_engine/core/budget_state.json.
+- RequestScheduler.consume(name) returns False + logs WARNING on exhaustion.
+
+FAILOVER CHAIN
+--------------
+  gnews exhausted      -> newsdata (NewsData.io country baseline)
+  worldnews exhausted  -> newsdata + newscatcher (India city-keyword fallback)
+  mediastack exhausted -> newsdata (4x country providers: GB, DE, FR, IT)
+
+PROVIDER FIELD MAPPINGS
+-----------------------
+  GNews:      articles[].{title, description, url, source.name, publishedAt}
+  WorldNews:  news[].{title, text/summary, url, source_country, publish_date}
+  Mediastack: data[].{title, description, url, source, published_at, country}
+
+VALIDATION
+----------
+  factory.router.resolve("US") -> "gnews"
+  factory.router.resolve("IN") -> "worldnews"
+  factory.router.resolve("GB") -> "mediastack"
+  factory.router.resolve("JP") -> "newsdata"  (global fallback)
+  After worldnews bucket full:
+  factory.router.resolve("IN") -> "newsdata"  (failover confirmed)
+
+NOTE: "Actually Relevant" API cited in the A&D is not a known public API.
+NewsData.io serves as GLOBAL_FALLBACK. ActuallyRelevantProvider is pending
+once endpoint documentation is available (tech debt).
+
+================================================================================
+  MODULE 10.2 — LOCAL BUNDLING LOGIC
+  Date: 2026-03-14
+================================================================================
+
+OBJECTIVE
+---------
+Maximise sub-national news density per API credit by bundling city names into
+single Boolean OR-query requests (≤5 cities per call).
+
+FILES CREATED / MODIFIED
+-------------------------
+1. ingestion_engine/core/bundler.py  (NEW)
+   RegionBundle dataclass:
+     subdivision: str      # "US-TX"
+     country:     str      # "US"
+     cities:      List[str]  # ["Houston", "Dallas", "Austin", "San Antonio", "Fort Worth"]
+     query:       str      # "(Houston OR Dallas OR Austin OR San Antonio OR Fort Worth)"
+
+   RegionBundler class:
+     - Reads CITY_TO_STATE at init; groups by subdivision; chunks into ≤5.
+     - first_bundle(sub)       → top-priority bundle for always-on use.
+     - get_bundles(sub)        → all bundles for rotating pool.
+     - all_bundles(country=…)  → filtered view.
+     - bundle_count(sub)       → number of bundles (logging).
+
+2. ingestion_engine/providers/newsdata_io.py  (UPDATED)
+   Added query_keywords: Optional[List[str]] parameter.
+   When set: params["q"] = "Houston OR Dallas OR Austin"
+   TagEnhancer re-assigns region_code per article after fetch.
+
+3. ingestion_engine/main.py  (UPDATED)
+   - Replaced manual NEWSCATCHER_ALWAYS_ON dict with RegionBundler.
+   - Always-on subs (IN-TN, IN-MH, US-CA, US-TX, US-NY):
+       first_bundle → NewsCatcherProvider (every cycle).
+       remaining bundles → sub_national rotating pool.
+   - HIGH_RES subs: all bundles → rotating pool (new coverage).
+   - _NEWSCATCHER_EXTRA: hand-curated subs without CITY_TO_STATE coverage
+       (CN-BJ, CN-SH, BR-SP, BR-RJ, ZA-GT, ZA-WC).
+
+TAG-HEAVY FLOW (Source of Truth = TagEnhancer)
+----------------------------------------------
+Bundle query: "(Houston OR Dallas OR Austin OR San Antonio OR Fort Worth)"
+  → API returns mixed articles.
+  → IntelligencePipeline.process() calls TagEnhancer.enhance() on EVERY
+    article before deduplication.
+  → TagEnhancer scans title+snippet; finds "Austin" → stamps US-TX with
+    Austin centroid.  "Dallas" → US-TX Dallas centroid.
+  → Two distinct blips appear on the globe from one API call.
+
+EFFICIENCY GAIN
+---------------
+Before: 1 NewsCatcher call per city → N calls for N cities.
+After:  1 NewsCatcher call per bundle → N/5 calls (≈5× reduction in quota).
+
+================================================================================
+  MODULE 11.5 — DOCKERIZATION & GCP CLOUD RUN DEPLOYMENT
+  Date: 2026-03-14
+================================================================================
+
+OBJECTIVE
+---------
+Containerize the OmnesVident backend for Google Cloud Run, with a protected
+/tasks/ingest endpoint triggered by Cloud Scheduler every 15 minutes.
+
+FILES CREATED / MODIFIED
+-------------------------
+1. Dockerfile  (NEW — project root)
+   Base:    python:3.12-slim
+   User:    non-root "app" user
+   CMD:     gunicorn api_storage.routes:app \
+              --worker-class uvicorn.workers.UvicornWorker \
+              --bind :$PORT --workers 1 --threads 8 --timeout 0
+   ENV:     PYTHONUNBUFFERED=1, PORT=8080
+
+2. cloudbuild.yaml  (NEW — project root)
+   Step 1 — docker build (with --cache-from :latest for faster incremental builds)
+   Step 2 — docker push --all-tags to Artifact Registry
+   Step 3 — gcloud run deploy with flags:
+     --platform managed
+     --allow-unauthenticated
+     --memory 512Mi
+     --cpu 1
+     --max-instances 10
+     --timeout 300
+     --set-secrets (all 7 env vars from Secret Manager)
+   Substitutions: _REGION, _SERVICE_NAME, _AR_REPO
+
+3. .dockerignore  (NEW — project root)
+   Excludes: .venv/, __pycache__, .env, *.db, *.sqlite,
+   budget_state.json, frontend_portal/, .git/, docs.
+
+4. requirements.txt  (UPDATED)
+   Added: gunicorn>=22.0.0, asyncpraw>=7.7.0,
+          google-cloud-firestore>=2.16.0
+
+5. ingestion_engine/runner.py  (NEW)
+   Extracted from main.py: run_ingestion_cycle() → List[NewsEvent]
+   Shared between two callers:
+     a. ingestion_engine/main.py  (CLI / local dev)
+        → run_ingestion_cycle() then push_to_api(events) via HTTP POST /ingest
+     b. api_storage/routes.py /tasks/ingest  (Cloud Run)
+        → run_ingestion_cycle() then _process_and_store(events) in-process
+
+6. ingestion_engine/main.py  (SIMPLIFIED)
+   Now a thin CLI wrapper — imports run_ingestion_cycle from runner.py,
+   calls push_to_api for the local-dev HTTP path.
+
+7. api_storage/routes.py  (UPDATED)
+   New endpoint: POST /tasks/ingest
+   Security:     X-Ingest-Token header validated against INGEST_SECRET env var.
+   Behaviour:    Runs ingestion cycle + in-process pipeline as BackgroundTask.
+                 Returns 202 immediately.
+                 Returns 503 if INGEST_SECRET not configured (disabled).
+                 Returns 403 on token mismatch.
+
+THE 15-MINUTE HEARTBEAT
+-----------------------
+                  ┌──────────────────┐
+  Cloud Scheduler │ POST /tasks/ingest│  every 15 min
+  ────────────────►│ X-Ingest-Token   │
+                  │ = $INGEST_SECRET  │
+                  └────────┬─────────┘
+                           │ BackgroundTask
+                           ▼
+                  run_ingestion_cycle()
+                           │
+                           ▼
+                  _process_and_store(events)
+                  (IntelligencePipeline → SQLite/SQLModel)
+
+FIRESTORE SCHEMAS (Prepared)
+----------------------------
+Collection: RawNews
+  Document fields:
+    title:        string
+    snippet:      string
+    source_url:   string
+    source_name:  string
+    region_code:  string  (ISO alpha-2 or 3166-2)
+    timestamp:    timestamp
+    ingested_at:  timestamp (server timestamp)
+
+Collection: MasterNews (enriched)
+  Document fields:
+    dedup_group_id:    string  (8-char hash, document ID)
+    title:             string
+    snippet:           string
+    source_url:        string
+    source_name:       string
+    region_code:       string
+    category:          string
+    mentioned_regions: array<string>
+    secondary_sources: array<string>
+    latitude:          number
+    longitude:         number
+    timestamp:         timestamp
+    processed_at:      timestamp
+
+Firestore client is initialised as a module-level singleton using the
+Cloud Run Default Service Account (no explicit credentials needed):
+    from google.cloud import firestore
+    _db = firestore.AsyncClient()   # lazy — only in Cloud Run
+
+GCLOUD COMMANDS — LOCAL BUILD & DEPLOY
+---------------------------------------
+# Prerequisite: authenticate and configure project
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+
+# Create Artifact Registry repository (once)
+gcloud artifacts repositories create omnesvident \
+  --repository-format=docker \
+  --location=us-central1
+
+# Store secrets in Secret Manager (once per secret)
+gcloud secrets create INGEST_SECRET --replication-policy=automatic
+echo -n "your-secret-token" | gcloud secrets versions add INGEST_SECRET --data-file=-
+
+# Submit build + deploy via Cloud Build
+gcloud builds submit \
+  --config cloudbuild.yaml \
+  --substitutions _REGION=us-central1,_SERVICE_NAME=omnesvident-api,_AR_REPO=omnesvident
+
+# Create Cloud Scheduler job (once — triggers ingestion every 15 minutes)
+SERVICE_URL=$(gcloud run services describe omnesvident-api \
+  --region us-central1 --format 'value(status.url)')
+
+gcloud scheduler jobs create http omnesvident-ingest \
+  --location=us-central1 \
+  --schedule="*/15 * * * *" \
+  --uri="${SERVICE_URL}/tasks/ingest" \
+  --http-method=POST \
+  --headers="X-Ingest-Token=your-secret-token" \
+  --time-zone="UTC"
+
+# Verify Cloud Run service is running
+gcloud run services describe omnesvident-api \
+  --region us-central1 \
+  --format "value(status.conditions[0].status)"
+
+================================================================================
+  MODULE 12.0 — FIRESTORE PERSISTENCE & REFINEMENT
+  Date: 2026-03-14
+================================================================================
+
+OBJECTIVE
+---------
+Dual-write ingested news to Firestore for durable cloud persistence alongside
+the existing SQLite store.  A Refiner task promotes raw buffer docs to a clean
+master_news collection with subdivision-level geo-tagging and date_group indexing.
+
+FILES CREATED
+-------------
+1. database/__init__.py  (empty package marker)
+
+2. database/firestore_manager.py  (NEW)
+   FirestoreManager class — async Firestore client wrapper.
+   Lazy singleton: AsyncClient created on first use; never fails at import.
+   Graceful no-op: all methods return safe defaults if FIRESTORE_PROJECT unset.
+
+   Methods:
+     push_to_raw(events, provider_id)
+       Batch-writes one doc per NewsEvent to raw_ingestion_buffer.
+       Uses WriteBatch in 500-doc chunks for atomic efficiency.
+       Doc ID: auto-generated (contents, not URL, drive uniqueness).
+
+     get_pending_raw(limit=100)
+       Queries raw_ingestion_buffer where status="pending".
+       Returns List[dict] with "_doc_id" injected for update reference.
+
+     promote_to_master(event, date_group, extra_fields=None)
+       Upserts to master_news using SHA-256[:24](source_url) as doc ID.
+       merge=True → safe to call multiple times for the same URL.
+
+     mark_raw_processed(doc_ids)
+       Batch-updates status="processed" + processed_at timestamp.
+
+     query_master(region_code, start_date, end_date, limit)
+       Temporal + region query against master_news.
+       date_group stored as "YYYY-MM-DD" for lexicographic range queries.
+
+   Module-level singleton:
+     from database.firestore_manager import firestore_manager
+
+3. tasks/__init__.py  (empty package marker)
+
+4. tasks/refiner.py  (NEW)
+   FirestoreRefiner class — Raw-to-Master promotion pipeline.
+
+   refine_pending(limit=100):
+     1. get_pending_raw() → list of buffer docs
+     2. Reconstruct NewsEvent from raw_payload
+     3. TagEnhancer.enhance() → correct subdivision region_code
+     4. date_group = timestamp.strftime("%Y-%m-%d")
+     5. promote_to_master() → master_news upsert
+     6. mark_raw_processed() → buffer doc status="processed"
+
+   Module-level singleton:
+     from tasks.refiner import refiner
+
+FIRESTORE COLLECTION SCHEMAS
+-----------------------------
+Collection: raw_ingestion_buffer
+  Auto-generated document IDs.
+  Fields:
+    raw_payload  : Map
+      title        : string
+      snippet      : string
+      source_url   : string
+      source_name  : string
+      region_code  : string  (pre-TagEnhancer; may be country-level)
+      timestamp    : timestamp
+    provider_id  : string   (e.g. "newscatcher_in-tn", "ingestion_engine")
+    fetched_at   : timestamp
+    status       : string   ["pending", "processed"]
+    processed_at : timestamp (set by mark_raw_processed)
+
+Collection: master_news
+  Document ID = SHA-256[:24](source_url) — idempotent upsert guarantee.
+  Fields:
+    title        : string   (Indexed in Firestore console)
+    snippet      : string
+    source_url   : string   (Unique — drives document ID)
+    source_name  : string
+    region_code  : string   (Indexed; post-TagEnhancer subdivision code)
+    timestamp    : timestamp (Indexed for temporal queries)
+    date_group   : string   "YYYY-MM-DD" (Indexed; for date range filtering)
+    promoted_at  : timestamp
+
+FILES MODIFIED
+--------------
+5. api_storage/repository.py
+   get_latest_news() signature extended:
+     + start_date: Optional[datetime] = None
+     + end_date:   Optional[datetime] = None
+   SQLModel WHERE clauses:
+     StoryRecord.timestamp >= start_date  (when provided)
+     StoryRecord.timestamp <= end_date    (when provided)
+
+6. api_storage/routes.py
+   GET /news and GET /news/{region_code} both gain:
+     ?start_date=<ISO 8601>  — stories on or after this timestamp
+     ?end_date=<ISO 8601>    — stories on or before this timestamp
+   These map directly to repository.get_latest_news() start_date/end_date.
+
+   POST /tasks/ingest background task updated:
+     After SQLite pipeline → runs refiner.refine_pending(limit=200)
+     Promotes newly-pushed raw docs to master_news in the same cycle.
+
+7. ingestion_engine/runner.py
+   After IngestionManager.run() → optionally calls firestore_manager.push_to_raw()
+   Wrapped in try/except; skipped silently if FIRESTORE_PROJECT unset.
+
+INGESTION CYCLE DATA FLOW (Cloud Run)
+--------------------------------------
+  Cloud Scheduler POST /tasks/ingest (every 15 min)
+          │
+          ▼
+  run_ingestion_cycle()
+          │
+          ├──► SQLite: _process_and_store(events)
+          │    IntelligencePipeline → StoryRecord upsert
+          │
+          └──► Firestore: firestore_manager.push_to_raw(events)
+               raw_ingestion_buffer docs (status="pending")
+                        │
+                        ▼ (same cycle, BackgroundTask)
+               refiner.refine_pending(limit=200)
+                  TagEnhancer.enhance() per doc
+                  promote_to_master() → master_news
+                  mark_raw_processed() → status="processed"
+
+TEMPORAL QUERY EXAMPLE
+-----------------------
+  # Stories from the last 24 hours for India:
+  GET /news?region=IN&start_date=2026-03-13T00:00:00Z&end_date=2026-03-14T23:59:59Z
+
+  # Firestore master_news for a specific date:
+  await firestore_manager.query_master(
+      region_code="IN-TN",
+      start_date="2026-03-14",
+      end_date="2026-03-14",
+  )
+
+VERIFICATION CHECKLIST
+-----------------------
+  □ FIRESTORE_PROJECT env var set in Cloud Run service
+  □ Cloud Run Default Service Account has roles/datastore.user IAM role
+  □ Composite Firestore index created:
+      Collection: master_news
+      Fields: region_code ASC, timestamp DESC
+  □ Manual trigger: POST /tasks/ingest with correct X-Ingest-Token
+  □ Firestore console shows raw_ingestion_buffer docs status="processed"
+  □ master_news documents have subdivision region_codes (e.g. "IN-TN" not "IN")
+
+================================================================================

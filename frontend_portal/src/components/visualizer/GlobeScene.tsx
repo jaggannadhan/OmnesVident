@@ -1,13 +1,57 @@
-import { Suspense, useState, useCallback } from "react";
+import { Suspense, useState, useCallback, useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Stars } from "@react-three/drei";
 import { Earth } from "./Earth";
 import { GlobeGrid } from "./GlobeGrid";
 import { ContinentLines } from "./ContinentLines";
+import { StateBorders } from "./StateBorders";
 import { NewsBlips } from "./NewsBlips";
 import { useNews } from "../../hooks/useNews";
 import { CATEGORY_COLORS } from "./Marker";
 import { CATEGORY_META } from "../NewsCard";
+
+// ---------------------------------------------------------------------------
+// State Focus — subdivisions available per high-res country
+// ---------------------------------------------------------------------------
+
+const FOCUS_STATES: Record<string, Array<{ code: string; name: string }>> = {
+  US: [
+    { code: "US-CA", name: "CA" }, { code: "US-TX", name: "TX" },
+    { code: "US-NY", name: "NY" }, { code: "US-FL", name: "FL" },
+    { code: "US-WA", name: "WA" }, { code: "US-IL", name: "IL" },
+    { code: "US-GA", name: "GA" }, { code: "US-OH", name: "OH" },
+    { code: "US-NC", name: "NC" }, { code: "US-PA", name: "PA" },
+  ],
+  IN: [
+    { code: "IN-MH", name: "MH" }, { code: "IN-DL", name: "DL" },
+    { code: "IN-KA", name: "KA" }, { code: "IN-TN", name: "TN" },
+    { code: "IN-WB", name: "WB" }, { code: "IN-GJ", name: "GJ" },
+    { code: "IN-RJ", name: "RJ" }, { code: "IN-UP", name: "UP" },
+  ],
+  CN: [
+    { code: "CN-BJ", name: "BJ" }, { code: "CN-SH", name: "SH" },
+    { code: "CN-GD", name: "GD" }, { code: "CN-SC", name: "SC" },
+    { code: "CN-HB", name: "HB" }, { code: "CN-ZJ", name: "ZJ" },
+    { code: "CN-JS", name: "JS" },
+  ],
+  BR: [
+    { code: "BR-SP", name: "SP" }, { code: "BR-RJ", name: "RJ" },
+    { code: "BR-MG", name: "MG" }, { code: "BR-CE", name: "CE" },
+    { code: "BR-BA", name: "BA" }, { code: "BR-RS", name: "RS" },
+  ],
+  CA: [
+    { code: "CA-ON", name: "ON" }, { code: "CA-BC", name: "BC" },
+    { code: "CA-QC", name: "QC" }, { code: "CA-AB", name: "AB" },
+  ],
+  AU: [
+    { code: "AU-NSW", name: "NSW" }, { code: "AU-VIC", name: "VIC" },
+    { code: "AU-QLD", name: "QLD" }, { code: "AU-WA",  name: "WA"  },
+  ],
+  ZA: [
+    { code: "ZA-GT", name: "GT" }, { code: "ZA-WC", name: "WC" },
+    { code: "ZA-KZN", name: "KZN" },
+  ],
+};
 
 // ---------------------------------------------------------------------------
 // Loading fallback rendered inside the Canvas
@@ -27,9 +71,7 @@ function GlobeLoader() {
 // ---------------------------------------------------------------------------
 
 function Legend() {
-  const entries = Object.entries(CATEGORY_COLORS).filter(
-    ([cat]) => cat !== "POLITICS" // deduplicate (shares colour with WORLD)
-  );
+  const entries = Object.entries(CATEGORY_COLORS);
   return (
     <div className="absolute bottom-3 left-3 flex flex-wrap gap-x-3 gap-y-1 pointer-events-none">
       {entries.map(([cat, color]) => (
@@ -48,16 +90,67 @@ function Legend() {
 }
 
 // ---------------------------------------------------------------------------
+// State Focus selector bar (shown only for the 7 high-res countries)
+// ---------------------------------------------------------------------------
+
+interface StateFocusBarProps {
+  country: string;
+  focusState: string | null;
+  onFocusState: (code: string | null) => void;
+}
+
+function StateFocusBar({ country, focusState, onFocusState }: StateFocusBarProps) {
+  const states = FOCUS_STATES[country];
+  if (!states) return null;
+
+  return (
+    <div className="absolute bottom-9 left-3 right-3 flex flex-wrap items-center gap-1 z-10 pointer-events-auto">
+      <span className="text-[8px] font-mono text-slate-700 mr-1 uppercase tracking-widest">
+        State Focus:
+      </span>
+
+      {/* "All" clears the focus filter */}
+      <button
+        onClick={() => onFocusState(null)}
+        className={`text-[8px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
+          focusState === null
+            ? "border-cyan-400/60 text-cyan-400 bg-cyan-400/10"
+            : "border-rim text-slate-600 hover:text-slate-400"
+        }`}
+      >
+        All
+      </button>
+
+      {states.map(({ code, name }) => (
+        <button
+          key={code}
+          onClick={() => onFocusState(focusState === code ? null : code)}
+          className={`text-[8px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
+            focusState === code
+              ? "border-cyan-400/60 text-cyan-400 bg-cyan-400/10"
+              : "border-rim text-slate-600 hover:text-slate-400"
+          }`}
+        >
+          {name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // GlobeScene
 // ---------------------------------------------------------------------------
 
 interface GlobeSceneProps {
   /** Optional: restrict blips to a region; undefined = global */
   region?: string;
+  /** Optional: restrict blips to a category; undefined = all */
+  category?: string;
 }
 
-export function GlobeScene({ region }: GlobeSceneProps) {
-  const { data, isLoading } = useNews({ region, limit: 200 });
+export function GlobeScene({ region, category }: GlobeSceneProps) {
+  const { data, isLoading } = useNews({ region, category, limit: 1000 });
   const stories = data?.stories ?? [];
 
   // Pause auto-rotation while the cursor is over the globe
@@ -67,6 +160,12 @@ export function GlobeScene({ region }: GlobeSceneProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const handleSelectId = useCallback((id: string | null) => setSelectedId(id), []);
   const cardOpen = selectedId !== null;
+
+  // State Focus — reset whenever the active country changes
+  const [focusState, setFocusState] = useState<string | null>(null);
+  useEffect(() => { setFocusState(null); }, [region]);
+
+  const hasStateFocus = region !== undefined && FOCUS_STATES[region] !== undefined;
 
   return (
     <div
@@ -120,17 +219,28 @@ export function GlobeScene({ region }: GlobeSceneProps) {
         <Suspense fallback={<GlobeLoader />}>
           <Earth paused={cursorOver || cardOpen}>
             <GlobeGrid />
+            <StateBorders />
             <ContinentLines />
             {stories.length > 0 && (
               <NewsBlips
                 stories={stories}
                 selectedId={selectedId}
                 onSelectId={handleSelectId}
+                focusState={focusState}
               />
             )}
           </Earth>
         </Suspense>
       </Canvas>
+
+      {/* State Focus bar — 7 high-res countries only */}
+      {hasStateFocus && (
+        <StateFocusBar
+          country={region!}
+          focusState={focusState}
+          onFocusState={setFocusState}
+        />
+      )}
 
       <Legend />
     </div>

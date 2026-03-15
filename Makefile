@@ -3,9 +3,9 @@
         test test-ingestion test-intelligence test-api \
         all stop
 
-PYTHON  := python
-PIP     := pip
-UVICORN := uvicorn
+PYTHON  := .venv/bin/python
+PIP     := .venv/bin/pip
+UVICORN := .venv/bin/uvicorn
 NPM     := npm
 
 API_HOST := 127.0.0.1

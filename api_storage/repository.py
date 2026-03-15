@@ -50,6 +50,7 @@ def save_stories(session: Session, stories: List[EnrichedStory]) -> Tuple[int, i
         ).first()
 
         if existing:
+            changed = False
             # Merge secondary sources, avoiding duplicates
             current_sources: List[str] = existing.secondary_sources
             new_sources = [
@@ -58,6 +59,20 @@ def save_stories(session: Session, stories: List[EnrichedStory]) -> Tuple[int, i
             ]
             if new_sources:
                 existing.secondary_sources = current_sources + new_sources
+                changed = True
+            # Upgrade coordinates and region_code when the pipeline now has
+            # better data (e.g. stories stored before Module 7.2 had null lat/lng)
+            if story.latitude is not None and existing.latitude is None:
+                existing.latitude = story.latitude
+                existing.longitude = story.longitude
+                changed = True
+            if story.lead_event.region_code and (
+                "-" in story.lead_event.region_code
+                and "-" not in (existing.region_code or "")
+            ):
+                existing.region_code = story.lead_event.region_code
+                changed = True
+            if changed:
                 session.add(existing)
             merged += 1
             logger.debug("Merged story: %s", story.dedup_group_id)
@@ -74,6 +89,8 @@ def save_stories(session: Session, stories: List[EnrichedStory]) -> Tuple[int, i
                 mentioned_regions_json=json.dumps(story.mentioned_regions),
                 secondary_sources_json=json.dumps(story.secondary_sources),
                 processed_at=story.processed_at,
+                latitude=story.latitude,
+                longitude=story.longitude,
             )
             session.add(record)
             inserted += 1
@@ -108,6 +125,8 @@ def get_latest_news(
     category: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
 ) -> Tuple[List[StoryRecord], int]:
     """
     Return (stories, total_count) ordered by timestamp descending.
@@ -118,6 +137,8 @@ def get_latest_news(
 
     This dual-match enables cross-regional story discovery: a UK story
     about Japan is returned when filtering by both GB and JP.
+
+    start_date / end_date filter by story timestamp (inclusive on both ends).
     """
     query = select(StoryRecord)
 
@@ -130,6 +151,12 @@ def get_latest_news(
             (StoryRecord.region_code == region_upper)
             | StoryRecord.mentioned_regions_json.contains(f'"{region_upper}"')
         )
+
+    if start_date:
+        query = query.where(StoryRecord.timestamp >= start_date)
+
+    if end_date:
+        query = query.where(StoryRecord.timestamp <= end_date)
 
     query = query.order_by(col(StoryRecord.timestamp).desc())
 

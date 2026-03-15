@@ -53,6 +53,10 @@ class StoryOut(BaseModel):
     timestamp: datetime
     processed_at: datetime
 
+    # Geo-Intelligence (Module 6)
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
     model_config = {"from_attributes": True}
 
 

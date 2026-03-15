@@ -12,10 +12,12 @@ The Intelligence Pipeline is CPU-bound; it runs in a thread-pool executor
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import List, Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from sqlmodel import Session
 
 from api_storage.database import create_db_and_tables, get_db_session
@@ -115,6 +117,8 @@ def _to_story_out(record) -> StoryOut:
         secondary_sources=record.secondary_sources,
         timestamp=record.timestamp,
         processed_at=record.processed_at,
+        latitude=record.latitude,
+        longitude=record.longitude,
     )
 
 
@@ -126,13 +130,21 @@ def _to_story_out(record) -> StoryOut:
 def list_news(
     region: Optional[str] = Query(None, description="ISO alpha-2 region filter"),
     category: Optional[str] = Query(None, description="Category filter (e.g. POLITICS)"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=2000),
     offset: int = Query(0, ge=0),
+    start_date: Optional[datetime] = Query(None, description="ISO 8601 — filter stories on or after this timestamp"),
+    end_date: Optional[datetime] = Query(None, description="ISO 8601 — filter stories on or before this timestamp"),
     session: Session = Depends(get_db_session),
 ):
     """Return a paginated list of enriched stories with optional filters."""
     stories, total = get_latest_news(
-        session, region=region, category=category, limit=limit, offset=offset
+        session,
+        region=region,
+        category=category,
+        limit=limit,
+        offset=offset,
+        start_date=start_date,
+        end_date=end_date,
     )
     return PaginatedStoriesResponse(
         total=total,
@@ -146,8 +158,10 @@ def list_news(
 def list_news_by_region(
     region_code: str,
     category: Optional[str] = Query(None),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=2000),
     offset: int = Query(0, ge=0),
+    start_date: Optional[datetime] = Query(None, description="ISO 8601 — filter stories on or after this timestamp"),
+    end_date: Optional[datetime] = Query(None, description="ISO 8601 — filter stories on or before this timestamp"),
     session: Session = Depends(get_db_session),
 ):
     """Return stories for a specific ISO alpha-2 region (primary + cross-regional)."""
@@ -159,6 +173,8 @@ def list_news_by_region(
         category=category,
         limit=limit,
         offset=offset,
+        start_date=start_date,
+        end_date=end_date,
     )
     return PaginatedStoriesResponse(
         total=total,
@@ -213,3 +229,65 @@ async def ingest_events(
 @app.get("/health", tags=["System"])
 def health_check():
     return {"status": "ok", "version": app.version}
+
+
+# ---------------------------------------------------------------------------
+# Cloud Scheduler heartbeat — POST /tasks/ingest
+# ---------------------------------------------------------------------------
+
+# Set INGEST_SECRET in Cloud Run env vars; Cloud Scheduler sends it as
+# X-Ingest-Token header.  If the env var is unset the endpoint is disabled.
+_INGEST_SECRET = os.getenv("INGEST_SECRET", "")
+
+
+@app.post("/tasks/ingest", status_code=202, tags=["Tasks"])
+async def trigger_ingestion(
+    background_tasks: BackgroundTasks,
+    x_ingest_token: Optional[str] = Header(default=None),
+):
+    """
+    Triggered by Cloud Scheduler every 15 minutes.
+
+    Security: validates the X-Ingest-Token header against the INGEST_SECRET
+    environment variable.  Returns 403 if the secret is missing or wrong.
+    Returns 503 if INGEST_SECRET is not configured (endpoint disabled).
+
+    The ingestion cycle runs in a BackgroundTask so this endpoint returns
+    202 immediately.  Events are processed in-process — no HTTP round-trip
+    to /ingest needed.
+    """
+    if not _INGEST_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Ingestion endpoint not configured (INGEST_SECRET not set).",
+        )
+    if x_ingest_token != _INGEST_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-Ingest-Token.")
+
+    async def _run() -> None:
+        try:
+            from ingestion_engine.runner import run_ingestion_cycle
+            events = await run_ingestion_cycle()
+            if not events:
+                logger.warning("/tasks/ingest: ingestion cycle produced no events.")
+                return
+
+            # 1. SQLite pipeline — always runs (primary store)
+            await _process_and_store(events)
+            logger.info("/tasks/ingest: SQLite pipeline processed %d event(s).", len(events))
+
+            # 2. Firestore Refiner — runs after raw buffer push (done in runner.py)
+            #    Promotes pending raw docs to master_news with subdivision tagging.
+            try:
+                from tasks.refiner import refiner
+                promoted = await refiner.refine_pending(limit=200)
+                if promoted:
+                    logger.info("/tasks/ingest: Refiner promoted %d doc(s) to master_news.", promoted)
+            except Exception as ref_exc:
+                logger.warning("/tasks/ingest: Refiner skipped — %s", ref_exc)
+
+        except Exception as exc:
+            logger.error("/tasks/ingest: unhandled error — %s", exc, exc_info=True)
+
+    background_tasks.add_task(_run)
+    return {"status": "accepted", "message": "Ingestion cycle queued."}

@@ -126,3 +126,111 @@ TECHNICAL DEBT
    to avoid blocking the event loop.
 
 ================================================================================
+
+================================================================================
+MODULE 12.5 — AUTOMATED HEARTBEAT & SCHEDULER
+Updated: 2026-03-15
+================================================================================
+
+OBJECTIVE
+---------
+Automate the news ingestion cycle via Google Cloud Scheduler triggering
+the Cloud Run service every 15 minutes, maintaining a continuous stream
+of fresh data into the Firestore buffer.
+
+IMPLEMENTATION STATUS: COMPLETE
+--------------------------------
+
+1. /tasks/ingest endpoint (api_storage/routes.py)
+   - Method: POST, returns 202 Accepted immediately (non-blocking).
+   - Security: Checks X-Ingest-Token header against INGEST_SECRET env var.
+     * Returns 503 if INGEST_SECRET is not configured.
+     * Returns 403 Forbidden if token is absent or doesn't match.
+   - On success:
+     * Calls run_ingestion_cycle() (ingestion_engine/runner.py) in a
+       FastAPI BackgroundTask to avoid blocking the HTTP response.
+     * runner.py writes raw events to raw_ingestion_buffer via
+       firestore_manager.push_to_raw() with status="pending".
+     * BackgroundTask then calls FirestoreRefiner.refine_pending(limit=200)
+       to promote processed stories to master_news.
+
+2. FirestoreRefiner (tasks/refiner.py)
+   - Queries raw_ingestion_buffer for docs with status="pending".
+   - Reconstructs NewsEvent from raw_payload JSON.
+   - Runs TagEnhancer.enhance() for subdivision geo-resolution.
+   - Upserts to master_news keyed by SHA-256[:24](source_url) for
+     idempotency (duplicate URLs never produce duplicate master docs).
+   - Updates source doc status to "processed" atomically.
+
+3. Firestore collections
+   - raw_ingestion_buffer: auto-ID docs, fields: raw_payload (JSON),
+     provider_id, ingested_at, status (pending -> processed).
+   - master_news: source-url-hash doc IDs, fields: title, snippet,
+     source_url, source_name, region_code, date_group (YYYY-MM-DD),
+     timestamp, latitude, longitude, tags.
+
+4. Composite Firestore indexes on master_news (project: omnesvident)
+   - (region_code ASC, timestamp DESC) — index CICAgOjXh4EK, READY
+   - (date_group ASC, timestamp DESC)  — index CICAgJiUpoMK, READY
+
+5. Cloud Scheduler job
+   - Job ID:   omnesvident-ingest
+   - Location: us-central1
+   - Schedule: */15 * * * * (UTC) — every 15 minutes
+   - Target:   POST https://omnesvident-api-naqkmfs2qa-uc.a.run.app/tasks/ingest
+   - Header:   X-Ingest-Token: <INGEST_SECRET>
+   - Deadline: 540 s
+   - State:    ENABLED
+
+   CLI command used to create/update:
+     gcloud scheduler jobs update http omnesvident-ingest \
+       --location=us-central1 \
+       --schedule="*/15 * * * *" \
+       --project=omnesvident
+
+6. Secret Manager secrets (project: omnesvident)
+   - INGEST_SECRET            — token for /tasks/ingest auth
+   - NEWSDATA_API_KEY         — NewsData.io
+   - CURRENTS_NEW_API         — Currents API
+   - WORLD_NEWS_API_KEY       — WorldNews API
+   - MEDIA_STACK_NEWS_API_KEY — Mediastack
+   - GNEWS_API                — GNews
+   - NEWSCATCHER_API_KEY      — NewsCatcher (excluded from active providers;
+                                key needs activation on local-news endpoint)
+   IAM: roles/secretmanager.secretAccessor bound to Cloud Run compute SA
+        (880643611795-compute@developer.gserviceaccount.com)
+
+7. Cloud Run deployment (revision omnesvident-api-00009-pw8)
+   - Service:  omnesvident-api, region us-central1
+   - URL:      https://omnesvident-api-naqkmfs2qa-uc.a.run.app
+   - Flags:    --no-cpu-throttling (required: keeps CPU allocated during
+               async background ingestion after HTTP response is sent)
+   - Memory:   512Mi, CPU: 1, max-instances: 10, timeout: 300s
+   - Env vars: FIRESTORE_PROJECT=omnesvident + all secrets mounted.
+
+VALIDATION
+----------
+- Cloud Scheduler fires every 15 minutes; last attempt returned 202.
+- raw_ingestion_buffer: 300 docs confirmed in Firestore console.
+- master_news: 200 docs confirmed with correct region_code, date_group,
+  title fields and composite indexes serving range queries.
+- Direct curl test:
+    curl -s -o /dev/null -w "%{http_code}" -X POST \
+      https://omnesvident-api-naqkmfs2qa-uc.a.run.app/tasks/ingest \
+      -H "X-Ingest-Token: <INGEST_SECRET>"
+    -> 202
+
+KNOWN GAPS / FUTURE WORK
+-------------------------
+1. SQLite stories are ephemeral — Cloud Run container restarts reset the
+   local SQLite DB. GET /news endpoints should read from Firestore
+   master_news rather than SQLite for persistence across restarts.
+2. NewsCatcher key needs activation on the local-news endpoint before
+   re-adding NewsCatcherProvider bundles to runner.py.
+3. Reddit provider requires OAuth client_id + client_secret (Reddit app)
+   to replace the current anonymous token flow.
+4. Rate-limit headroom: NewsData.io free tier caps at 200 credits/day;
+   first ~4 scheduler cycles get results, subsequent calls return 429
+   until midnight UTC reset.
+
+================================================================================

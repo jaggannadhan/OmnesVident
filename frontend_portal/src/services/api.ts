@@ -19,6 +19,8 @@ export interface StoryOut {
   secondary_sources: string[];
   timestamp: string;
   processed_at: string;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface PaginatedStoriesResponse {
@@ -52,7 +54,8 @@ export function fetchNews({
   offset = 0,
 }: FetchNewsParams = {}): Promise<PaginatedStoriesResponse> {
   const params = new URLSearchParams();
-  if (category) params.set("category", category);
+  // "WORLD" is the catch-all view — omit the filter so all stories are returned
+  if (category && category !== "WORLD") params.set("category", category);
   params.set("limit", String(limit));
   params.set("offset", String(offset));
 
