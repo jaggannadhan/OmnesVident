@@ -4,6 +4,7 @@ import { Sidebar } from "./components/Sidebar";
 import { NewsGrid } from "./components/NewsGrid";
 import { WorldMap } from "./components/WorldMap";
 import { GlobeErrorBoundary } from "./components/visualizer/GlobeErrorBoundary";
+import { GlobeControls, type DateRange } from "./components/GlobeControls";
 
 // Lazy-load the heavy R3F bundle so it doesn't block the initial paint
 const GlobeScene = lazy(() =>
@@ -38,6 +39,10 @@ function FeedView() {
   const [offset, setOffset] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [globeOpen, setGlobeOpen] = useState(true);
+  const [dateRange, setDateRange] = useState<DateRange>({
+    start: undefined, // defaults to last 24 h on the backend
+    end: undefined,
+  });
 
   const handleRegionSelect = useCallback(
     (region: string | undefined) => {
@@ -125,8 +130,11 @@ function FeedView() {
             )}
           </div>
 
-          {/* View toggle + live indicator */}
+          {/* View toggle + time controls + live indicator */}
           <div className="ml-auto flex items-center gap-3">
+            {/* Time-range selector */}
+            <GlobeControls value={dateRange} onChange={(r) => { setDateRange(r); setOffset(0); }} />
+
             <button
               onClick={() => setGlobeOpen((p) => !p)}
               className={`hidden md:inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-md border transition-colors ${
@@ -160,7 +168,7 @@ function FeedView() {
                       </div>
                     }
                   >
-                    <GlobeScene region={regionCode} category={category} />
+                    <GlobeScene region={regionCode} category={category} startDate={dateRange.start} endDate={dateRange.end} />
                   </Suspense>
                 </GlobeErrorBoundary>
               </div>
@@ -179,6 +187,8 @@ function FeedView() {
               category={category}
               offset={offset}
               limit={24}
+              startDate={dateRange.start}
+              endDate={dateRange.end}
               onOffsetChange={setOffset}
               onCategoryClick={handleCategoryClick}
               onRegionClick={handleRegionSelect}

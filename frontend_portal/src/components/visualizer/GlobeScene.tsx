@@ -147,10 +147,14 @@ interface GlobeSceneProps {
   region?: string;
   /** Optional: restrict blips to a category; undefined = all */
   category?: string;
+  /** ISO-8601 — show stories on or after this timestamp */
+  startDate?: string;
+  /** ISO-8601 — show stories on or before this timestamp */
+  endDate?: string;
 }
 
-export function GlobeScene({ region, category }: GlobeSceneProps) {
-  const { data, isLoading } = useNews({ region, category, limit: 1000 });
+export function GlobeScene({ region, category, startDate, endDate }: GlobeSceneProps) {
+  const { data, isLoading } = useNews({ region, category, limit: 1000, start_date: startDate, end_date: endDate });
   const stories = data?.stories ?? [];
 
   // Pause auto-rotation while the cursor is over the globe

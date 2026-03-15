@@ -291,6 +291,100 @@ class FirestoreManager:
             logger.error("FirestoreManager.query_master: query failed — %s", exc)
             return []
 
+    async def query_master_by_timestamp(
+        self,
+        region_code: Optional[str] = None,
+        start_dt: Optional[datetime] = None,
+        end_dt: Optional[datetime] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Query master_news using proper datetime comparison on the `timestamp` field.
+
+        Uses composite index (region_code ASC, timestamp DESC) when region_code
+        is provided, otherwise falls back to the single-field timestamp index.
+
+        Returns docs ordered by timestamp DESC.
+        """
+        if not self._is_enabled():
+            return []
+        client = await self._get_client()
+        if client is None:
+            return []
+
+        try:
+            from google.cloud import firestore  # type: ignore
+
+            q = client.collection(_MASTER_COLLECTION)
+            if region_code:
+                q = q.where("region_code", "==", region_code.upper())
+            if start_dt:
+                q = q.where("timestamp", ">=", start_dt)
+            if end_dt:
+                q = q.where("timestamp", "<=", end_dt)
+            q = q.order_by("timestamp", direction="DESCENDING")
+            if offset:
+                q = q.offset(offset)
+            q = q.limit(limit)
+
+            results = []
+            async for doc in q.stream():
+                data = doc.to_dict()
+                data["_doc_id"] = doc.id
+                results.append(data)
+            return results
+        except Exception as exc:
+            logger.error(
+                "FirestoreManager.query_master_by_timestamp: query failed — %s", exc
+            )
+            return []
+
+    async def get_coverage(self) -> Dict[str, Any]:
+        """
+        Return the oldest and newest timestamps in master_news, plus total count.
+
+        Used by the /news/coverage endpoint so the frontend can grey out
+        time-range presets that fall outside the available data window.
+
+        Returns: {"oldest": datetime | None, "newest": datetime | None, "total": int}
+        """
+        if not self._is_enabled():
+            return {"oldest": None, "newest": None, "total": 0}
+        client = await self._get_client()
+        if client is None:
+            return {"oldest": None, "newest": None, "total": 0}
+
+        try:
+            col = client.collection(_MASTER_COLLECTION)
+
+            oldest_docs = col.order_by("timestamp", direction="ASCENDING").limit(1)
+            newest_docs = col.order_by("timestamp", direction="DESCENDING").limit(1)
+
+            oldest_ts: Optional[datetime] = None
+            async for doc in oldest_docs.stream():
+                d = doc.to_dict()
+                oldest_ts = d.get("timestamp")
+
+            newest_ts: Optional[datetime] = None
+            total = 0
+            async for doc in newest_docs.stream():
+                d = doc.to_dict()
+                newest_ts = d.get("timestamp")
+
+            # Approximate total via count() aggregate (Firestore native count)
+            try:
+                agg_query = col.count()
+                agg_result = await agg_query.get()
+                total = agg_result[0][0].value
+            except Exception:
+                total = -1  # Count unavailable — caller ignores -1
+
+            return {"oldest": oldest_ts, "newest": newest_ts, "total": total}
+        except Exception as exc:
+            logger.error("FirestoreManager.get_coverage: query failed — %s", exc)
+            return {"oldest": None, "newest": None, "total": 0}
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton — import and use directly in routes / runner

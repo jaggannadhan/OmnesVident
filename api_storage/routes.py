@@ -14,8 +14,8 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -142,11 +142,102 @@ def _to_story_out(record) -> StoryOut:
 
 
 # ---------------------------------------------------------------------------
+# Firestore helpers
+# ---------------------------------------------------------------------------
+
+def _firestore_doc_to_story_out(doc: Dict[str, Any]) -> StoryOut:
+    """Map a raw Firestore master_news document to a StoryOut schema."""
+    ts = doc.get("timestamp")
+    if ts is None:
+        ts = datetime.now(tz=timezone.utc)
+    elif not ts.tzinfo:
+        ts = ts.replace(tzinfo=timezone.utc)
+
+    promoted = doc.get("promoted_at") or ts
+    if not promoted.tzinfo:
+        promoted = promoted.replace(tzinfo=timezone.utc)
+
+    return StoryOut(
+        dedup_group_id=doc.get("_doc_id", ""),
+        title=doc.get("title", ""),
+        snippet=doc.get("snippet", ""),
+        source_url=doc.get("source_url", ""),
+        source_name=doc.get("source_name", ""),
+        region_code=doc.get("region_code", ""),
+        category=doc.get("category", "WORLD"),
+        mentioned_regions=doc.get("mentioned_regions") or [],
+        secondary_sources=doc.get("secondary_sources") or [],
+        timestamp=ts,
+        processed_at=promoted,
+        latitude=doc.get("latitude"),
+        longitude=doc.get("longitude"),
+    )
+
+
+async def _query_firestore(
+    region: Optional[str],
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
+    limit: int,
+    offset: int,
+) -> Optional[PaginatedStoriesResponse]:
+    """
+    Try to serve the request from Firestore master_news.
+
+    Returns None if Firestore is disabled or the query fails, so the caller
+    can fall back to SQLite.
+    """
+    try:
+        from database.firestore_manager import firestore_manager
+        if not firestore_manager._is_enabled():
+            return None
+
+        docs = await firestore_manager.query_master_by_timestamp(
+            region_code=region,
+            start_dt=start_date,
+            end_dt=end_date,
+            limit=limit,
+            offset=offset,
+        )
+        stories = [_firestore_doc_to_story_out(d) for d in docs]
+        # Firestore doesn't give us an exact total cheaply; use len + offset as estimate
+        total = offset + len(stories) + (1 if len(stories) == limit else 0)
+        return PaginatedStoriesResponse(
+            total=total, offset=offset, limit=limit, stories=stories
+        )
+    except Exception as exc:
+        logger.warning("_query_firestore: failed, will fall back to SQLite — %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
+@app.get("/news/coverage", tags=["News"])
+async def news_coverage():
+    """
+    Return the oldest/newest timestamps in Firestore master_news plus total count.
+    The frontend uses this to grey out time-range presets outside the data window.
+    Falls back gracefully when Firestore is unavailable.
+    """
+    try:
+        from database.firestore_manager import firestore_manager
+        if firestore_manager._is_enabled():
+            cov = await firestore_manager.get_coverage()
+            return {
+                "oldest": cov["oldest"].isoformat() if cov["oldest"] else None,
+                "newest": cov["newest"].isoformat() if cov["newest"] else None,
+                "total": cov["total"],
+                "source": "firestore",
+            }
+    except Exception as exc:
+        logger.warning("news_coverage: Firestore unavailable — %s", exc)
+    return {"oldest": None, "newest": None, "total": -1, "source": "unavailable"}
+
+
 @app.get("/news", response_model=PaginatedStoriesResponse, tags=["News"])
-def list_news(
+async def list_news(
     region: Optional[str] = Query(None, description="ISO alpha-2 region filter"),
     category: Optional[str] = Query(None, description="Category filter (e.g. POLITICS)"),
     limit: int = Query(50, ge=1, le=2000),
@@ -155,15 +246,38 @@ def list_news(
     end_date: Optional[datetime] = Query(None, description="ISO 8601 — filter stories on or before this timestamp"),
     session: Session = Depends(get_db_session),
 ):
-    """Return a paginated list of enriched stories with optional filters."""
+    """
+    Return a paginated list of enriched stories with optional filters.
+
+    When start_date/end_date are provided (or Firestore is enabled), queries
+    Firestore master_news for persistent cross-restart results.  Falls back to
+    SQLite when Firestore is unavailable.  Defaults to the last 24 hours if no
+    date filters are supplied.
+    """
+    # Default window: last 24 hours (keeps the globe populated on first load)
+    effective_start = start_date or (datetime.now(tz=timezone.utc) - timedelta(hours=24))
+    effective_end = end_date  # None = no upper bound
+
+    # Try Firestore first (persistent, survives container restarts)
+    fs_result = await _query_firestore(
+        region=region,
+        start_date=effective_start,
+        end_date=effective_end,
+        limit=limit,
+        offset=offset,
+    )
+    if fs_result is not None and fs_result.stories:
+        return fs_result
+
+    # Fall back to SQLite
     stories, total = get_latest_news(
         session,
         region=region,
         category=category,
         limit=limit,
         offset=offset,
-        start_date=start_date,
-        end_date=end_date,
+        start_date=effective_start,
+        end_date=effective_end,
     )
     return PaginatedStoriesResponse(
         total=total,
@@ -174,7 +288,7 @@ def list_news(
 
 
 @app.get("/news/{region_code}", response_model=PaginatedStoriesResponse, tags=["News"])
-def list_news_by_region(
+async def list_news_by_region(
     region_code: str,
     category: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=2000),
@@ -186,14 +300,28 @@ def list_news_by_region(
     """Return stories for a specific ISO alpha-2 region (primary + cross-regional)."""
     if len(region_code) != 2:
         raise HTTPException(status_code=422, detail="region_code must be ISO alpha-2 (2 chars).")
+
+    effective_start = start_date or (datetime.now(tz=timezone.utc) - timedelta(hours=24))
+    effective_end = end_date
+
+    fs_result = await _query_firestore(
+        region=region_code.upper(),
+        start_date=effective_start,
+        end_date=effective_end,
+        limit=limit,
+        offset=offset,
+    )
+    if fs_result is not None and fs_result.stories:
+        return fs_result
+
     stories, total = get_latest_news(
         session,
         region=region_code.upper(),
         category=category,
         limit=limit,
         offset=offset,
-        start_date=start_date,
-        end_date=end_date,
+        start_date=effective_start,
+        end_date=effective_end,
     )
     return PaginatedStoriesResponse(
         total=total,

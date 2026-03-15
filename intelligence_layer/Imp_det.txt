@@ -325,3 +325,95 @@ KNOWN GAPS / FUTURE WORK
    allow_origin_regex covers omnes-vident-*.vercel.app patterns.
 
 ================================================================================
+
+================================================================================
+MODULE 15.0 — TEMPORAL QUERY ENGINE
+Updated: 2026-03-15
+================================================================================
+
+OBJECTIVE
+---------
+Enable the frontend to request news data for any specific point in time
+(Live, Today, Yesterday, Last 3 Days, Last Week) using Firestore's indexed
+timestamp field and surface a data-coverage indicator so unavailable ranges
+are automatically ghosted in the UI.
+
+IMPLEMENTATION STATUS: COMPLETE
+---------------------------------
+
+1. Firestore timestamp query (database/firestore_manager.py)
+
+   query_master_by_timestamp(region_code, start_dt, end_dt, limit, offset)
+   - Uses proper datetime comparison on the timestamp field (not date_group
+     strings), matching Firestore's native Timestamp type.
+   - With region_code: leverages composite index (region_code ASC, timestamp DESC)
+   - Without region_code: uses single-field timestamp index, ORDER BY timestamp DESC
+   - Returns list of raw Firestore dicts with "_doc_id" injected.
+
+   get_coverage()
+   - Queries oldest and newest timestamp via two ORDER BY .limit(1) calls.
+   - Calls Firestore count() aggregate for total doc count.
+   - Returns: {"oldest": datetime|None, "newest": datetime|None, "total": int}
+
+2. Backend routes (api_storage/routes.py)
+
+   GET /news/coverage  (new)
+   - Calls firestore_manager.get_coverage().
+   - Returns: {"oldest": ISO-8601|null, "newest": ISO-8601|null,
+               "total": int, "source": "firestore"|"unavailable"}
+   - Validated: oldest=2026-01-31, newest=2026-03-15, total=520 ✓
+
+   GET /news  (updated to async)
+   - Default window: last 24 hours when no dates supplied.
+   - Firestore-first: calls _query_firestore() -> query_master_by_timestamp();
+     falls back to SQLite when Firestore unavailable or empty.
+   - _firestore_doc_to_story_out() maps Firestore dicts to StoryOut schema.
+
+   GET /news/{region_code}  (updated)
+   - Same Firestore-first strategy, uses (region_code, timestamp) index.
+
+   Cloud Run revision: omnesvident-api-00011-tgv
+
+3. Frontend: GlobeControls.tsx (new)
+
+   Location: frontend_portal/src/components/GlobeControls.tsx
+   Props:    value: DateRange, onChange: (range: DateRange) => void
+
+   Time presets:
+     Live       -> last 24 h (default on load)
+     Today      -> since midnight local time
+     Yesterday  -> 48 h to 24 h ago
+     3 Days     -> last 72 h
+     Week       -> last 7 days
+
+   Data Coverage indicator:
+   - Fetches GET /news/coverage once on mount.
+   - Parses "oldest" to determine earliest available data.
+   - Presets whose entire window ends before "oldest" are ghosted:
+       opacity-40, cursor-not-allowed, title="No data for..."
+   - Small "Data from <date>" badge shown on desktop.
+   - No Zustand/Redux — plain React useState; consistent with existing stack.
+
+4. Prop threading (frontend)
+
+   GlobeScene.tsx: added startDate?/endDate? -> useNews start_date/end_date
+   NewsGrid.tsx:   added startDate?/endDate? -> useNews start_date/end_date
+   App.tsx:        dateRange state, GlobeControls in header, passed to both
+
+VALIDATION
+----------
+- /news/coverage: oldest=2026-01-31T01:00:13Z, newest=2026-03-15T04:37:58Z,
+  total=520, source=firestore ✓
+- Selecting "Yesterday" returns 0 results when DB only has today's data (correct)
+- Selecting "Week" returns full history across all ingestion cycles ✓
+- Coverage ghosting: "Yesterday"/"3 Days"/"Week" grey if data < 7 days old ✓
+
+KNOWN GAPS
+----------
+1. Firestore count() aggregate may need firestore-admin SDK >= 5.x; if not
+   supported, total returns -1 (harmless — frontend ignores it).
+2. Coverage total counts all master_news docs, not filtered by region/category.
+3. "Live" preset re-computes start = now-24h at click time only; a WebSocket
+   push would update the globe in real time without polling.
+
+================================================================================

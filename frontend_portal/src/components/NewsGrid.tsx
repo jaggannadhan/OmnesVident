@@ -108,6 +108,8 @@ interface NewsGridProps {
   category?: string;
   offset?: number;
   limit?: number;
+  startDate?: string;
+  endDate?: string;
   onOffsetChange?: (offset: number) => void;
   onCategoryClick?: (category: string) => void;
   onRegionClick?: (region: string) => void;
@@ -118,6 +120,8 @@ export function NewsGrid({
   category,
   offset = 0,
   limit = 24,
+  startDate,
+  endDate,
   onOffsetChange,
   onCategoryClick,
   onRegionClick,
@@ -127,6 +131,8 @@ export function NewsGrid({
     category,
     offset,
     limit,
+    start_date: startDate,
+    end_date: endDate,
   });
 
   return (
