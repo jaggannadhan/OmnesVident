@@ -1,0 +1,12 @@
+# Exclude everything except the frontend — prevents Vercel from
+# detecting FastAPI/Python and trying to deploy the backend.
+api_storage/
+ingestion_engine/
+intelligence_layer/
+database/
+tasks/
+requirements.txt
+Makefile
+Dockerfile
+*.py
+*.sh
