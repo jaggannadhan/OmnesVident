@@ -228,29 +228,72 @@ class FirestoreManager:
 
     async def mark_raw_processed(self, doc_ids: List[str]) -> None:
         """
-        Batch-update status → "processed" for the given raw_ingestion_buffer docs.
+        Delete promoted docs from raw_ingestion_buffer.
+
+        Once a doc is promoted to master_news it has no reason to remain in
+        the raw buffer — delete it immediately so the collection stays clean.
+        """
+        await self.delete_raw_docs(doc_ids)
+
+    async def delete_raw_docs(self, doc_ids: List[str]) -> int:
+        """
+        Batch-delete specific documents from raw_ingestion_buffer.
+        Returns number of docs deleted.
         """
         if not doc_ids or not self._is_enabled():
-            return
+            return 0
         client = await self._get_client()
         if client is None:
-            return
+            return 0
 
-        from google.cloud import firestore  # type: ignore
-
-        processed_at = datetime.now(tz=timezone.utc)
+        deleted = 0
         chunk_size = 500
         for i in range(0, len(doc_ids), chunk_size):
             batch = client.batch()
             for doc_id in doc_ids[i: i + chunk_size]:
                 ref = client.collection(_RAW_COLLECTION).document(doc_id)
-                batch.update(ref, {"status": "processed", "processed_at": processed_at})
+                batch.delete(ref)
+                deleted += 1
             try:
                 await batch.commit()
             except Exception as exc:
-                logger.error(
-                    "FirestoreManager.mark_raw_processed: batch failed — %s", exc
-                )
+                logger.error("FirestoreManager.delete_raw_docs: batch failed — %s", exc)
+                deleted -= len(doc_ids[i: i + chunk_size])
+        return deleted
+
+    async def clear_raw_buffer(self, status: Optional[str] = None, limit: int = 5000) -> int:
+        """
+        Delete documents from raw_ingestion_buffer.
+
+        status=None    → delete ALL docs regardless of status
+        status="processed" → delete only processed docs
+        status="pending"   → delete only pending docs
+
+        Returns number deleted.
+        """
+        if not self._is_enabled():
+            return 0
+        client = await self._get_client()
+        if client is None:
+            return 0
+
+        try:
+            q = client.collection(_RAW_COLLECTION)
+            if status:
+                q = q.where("status", "==", status)
+            q = q.limit(limit)
+
+            doc_ids = []
+            async for doc in q.stream():
+                doc_ids.append(doc.id)
+
+            if not doc_ids:
+                return 0
+
+            return await self.delete_raw_docs(doc_ids)
+        except Exception as exc:
+            logger.error("FirestoreManager.clear_raw_buffer: failed — %s", exc)
+            return 0
 
     async def query_master(
         self,

@@ -448,6 +448,18 @@ async def trigger_full_refinement(
                         "/tasks/refine-all: fallback refiner failed — %s", ref_exc
                     )
 
+            # Step 4: hard-clear any leftover docs in raw_ingestion_buffer
+            # (old "processed" entries that predate the delete-on-promote logic)
+            try:
+                from database.firestore_manager import firestore_manager as mgr
+                cleared = await mgr.clear_raw_buffer(limit=5000)
+                if cleared:
+                    logger.info(
+                        "/tasks/refine-all: cleared %d leftover raw buffer doc(s).", cleared
+                    )
+            except Exception as clr_exc:
+                logger.warning("/tasks/refine-all: buffer clear failed — %s", clr_exc)
+
         except Exception as exc:
             logger.error("/tasks/refine-all: unhandled error — %s", exc, exc_info=True)
 
@@ -456,6 +468,37 @@ async def trigger_full_refinement(
         "status": "accepted",
         "message": "Full geo-refinement queued (master_news re-refine + buffer drain).",
     }
+
+
+@app.post("/tasks/clear-raw-buffer", status_code=202, tags=["Tasks"])
+async def clear_raw_buffer(
+    background_tasks: BackgroundTasks,
+    x_ingest_token: Optional[str] = Header(default=None),
+):
+    """
+    Delete ALL documents from raw_ingestion_buffer immediately.
+
+    Runs iteratively in 5000-doc batches until the collection is empty.
+    Protected by X-Ingest-Token. Returns 202 immediately.
+    """
+    if not _INGEST_SECRET:
+        raise HTTPException(status_code=503, detail="Not configured.")
+    if x_ingest_token != _INGEST_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-Ingest-Token.")
+
+    async def _run() -> None:
+        from database.firestore_manager import firestore_manager as mgr
+        total = 0
+        while True:
+            cleared = await mgr.clear_raw_buffer(limit=5000)
+            total += cleared
+            logger.info("/tasks/clear-raw-buffer: deleted %d (total=%d)", cleared, total)
+            if cleared < 5000:
+                break
+        logger.info("/tasks/clear-raw-buffer: done. Total deleted: %d", total)
+
+    background_tasks.add_task(_run)
+    return {"status": "accepted", "message": "Raw buffer clear queued."}
 
 
 # ---------------------------------------------------------------------------
