@@ -49,8 +49,11 @@ export function NewsBlips({ stories, selectedId, onSelectId, focusState }: NewsB
       const seed    = idSeed(story.dedup_group_id);
 
       // Scale jitter with density so crowded regions spread further;
-      // single stories stay essentially in place (magnitude ≈ 0)
-      const magnitude = density > 1 ? 0.045 + Math.min(density - 1, 8) * 0.006 : 0;
+      // single stories stay essentially in place (magnitude ≈ 0).
+      // Cap at 0.026 world-units (≈ 170 km on Earth) so dense clusters
+      // in geographically tight regions (e.g. IN-TN next to Sri Lanka)
+      // don't bleed across international borders.
+      const magnitude = density > 1 ? 0.010 + Math.min(density - 1, 8) * 0.002 : 0;
       const position  = magnitude > 0 ? applyJitter(basePos, seed, magnitude) : basePos;
 
       return { story, position, density };
