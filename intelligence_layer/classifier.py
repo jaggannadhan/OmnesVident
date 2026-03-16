@@ -22,17 +22,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 CATEGORIES = [
-    "WORLD",
+    "ALL",
     "POLITICS",
-    "TECHNOLOGY",
+    "SCIENCE_TECH",
     "BUSINESS",
-    "SCIENCE",
     "HEALTH",
     "ENTERTAINMENT",
     "SPORTS",
 ]
 
-FALLBACK_CATEGORY = "WORLD"
+FALLBACK_CATEGORY = "ALL"
 
 # Each entry: (keyword_pattern, score)
 # Higher score = stronger signal.  Patterns are compiled as whole-word
@@ -61,7 +60,8 @@ _RAW_RULES: Dict[str, List[Tuple[str, int]]] = {
         (r"white\s+house", 2),
         (r"kremlin", 2),
     ],
-    "TECHNOLOGY": [
+    "SCIENCE_TECH": [
+        # Technology signals
         (r"artificial\s+intelligence|ai\b", 3),
         (r"machine\s+learning", 3),
         (r"software", 2),
@@ -74,7 +74,6 @@ _RAW_RULES: Dict[str, List[Tuple[str, int]]] = {
         (r"cloud\s+computing", 3),
         (r"semiconductor", 3),
         (r"robot(ics)?", 2),
-        (r"space(x)?|rocket|satellite", 2),
         (r"5g|6g", 2),
         (r"tech\s+(giant|company|firm)", 2),
         (r"apple|google|microsoft|meta|amazon|nvidia|openai", 2),
@@ -82,6 +81,24 @@ _RAW_RULES: Dict[str, List[Tuple[str, int]]] = {
         (r"encryption", 2),
         (r"autonomous\s+vehicle|self.driving", 3),
         (r"quantum\s+computing", 3),
+        # Science signals
+        (r"research(er|ers)?", 1),
+        (r"study\s+finds|study\s+shows|new\s+study", 2),
+        (r"scientist(s)?", 2),
+        (r"physics|chemistry|biolog(y|ical)", 3),
+        (r"climate\s+change|global\s+warming", 3),
+        (r"fossil", 2),
+        (r"astronaut|nasa|esa\b", 3),
+        (r"space(x)?|rocket|satellite", 2),
+        (r"genome|dna|rna\b", 3),
+        (r"particle\s+accelerator|cern\b", 3),
+        (r"asteroid|comet|exoplanet", 3),
+        (r"experiment", 2),
+        (r"peer.reviewed", 3),
+        (r"carbon\s+emission", 2),
+        (r"renewable\s+energy|solar\s+panel|wind\s+turbine", 2),
+        (r"evolution", 2),
+        (r"species", 2),
     ],
     "BUSINESS": [
         (r"stock\s+market|stock\s+exchange", 3),
@@ -100,24 +117,6 @@ _RAW_RULES: Dict[str, List[Tuple[str, int]]] = {
         (r"tariff", 2),
         (r"invest(or|ment|ing)", 2),
         (r"unemployment|job(s)?\s+(cut|loss|market)", 2),
-    ],
-    "SCIENCE": [
-        (r"research(er|ers)?", 1),
-        (r"study\s+finds|study\s+shows|new\s+study", 2),
-        (r"scientist(s)?", 2),
-        (r"physics|chemistry|biolog(y|ical)", 3),
-        (r"climate\s+change|global\s+warming", 3),
-        (r"fossil", 2),
-        (r"astronaut|nasa|esa\b", 3),
-        (r"genome|dna|rna\b", 3),
-        (r"particle\s+accelerator|cern\b", 3),
-        (r"asteroid|comet|exoplanet", 3),
-        (r"experiment", 2),
-        (r"peer.reviewed", 3),
-        (r"carbon\s+emission", 2),
-        (r"renewable\s+energy|solar\s+panel|wind\s+turbine", 2),
-        (r"evolution", 2),
-        (r"species", 2),
     ],
     "HEALTH": [
         (r"hospital|clinic|nhs\b", 2),
@@ -164,7 +163,7 @@ _RAW_RULES: Dict[str, List[Tuple[str, int]]] = {
         (r"formula\s+1|f1\b|grand\s+prix", 3),
         (r"marathon|triathlon|cycling\s+race", 2),
     ],
-    "WORLD": [
+    "ALL": [
         (r"war|conflict|ceasefire", 3),
         (r"military|troops|soldier", 2),
         (r"refugee|migrant|asylum", 2),
@@ -202,7 +201,7 @@ def classify(title: str, snippet: str = "") -> str:
     - Matches in the snippet are weighted ×1.
     - The category with the highest total score wins.
     - Ties are resolved alphabetically (deterministic).
-    - Falls back to WORLD if no keywords match at all.
+    - Falls back to ALL if no keywords match at all.
     """
     text_title = title.lower()
     text_snippet = snippet.lower()

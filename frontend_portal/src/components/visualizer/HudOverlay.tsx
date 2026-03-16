@@ -12,11 +12,10 @@ const CARD_DX   = 14;   // px  — matches translate(14px, ...)
 
 // ─── Category accent colours ──────────────────────────────────────────────────
 const CATEGORY_COLORS: Record<string, string> = {
-  WORLD:         "#38bdf8",
+  ALL:           "#38bdf8",
   POLITICS:      "#f87171",
-  TECHNOLOGY:    "#22d3ee",
+  SCIENCE_TECH:  "#22d3ee",
   BUSINESS:      "#34d399",
-  SCIENCE:       "#a78bfa",
   HEALTH:        "#6ee7b7",
   ENTERTAINMENT: "#f472b6",
   SPORTS:        "#fb923c",

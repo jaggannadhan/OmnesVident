@@ -60,8 +60,8 @@ export function fetchNews({
   end_date,
 }: FetchNewsParams = {}): Promise<PaginatedStoriesResponse> {
   const params = new URLSearchParams();
-  // "WORLD" is the catch-all view — omit the filter so all stories are returned
-  if (category && category !== "WORLD") params.set("category", category);
+  // "ALL" is the catch-all view — omit the filter so all stories are returned
+  if (category && category !== "ALL") params.set("category", category);
   params.set("limit", String(limit));
   params.set("offset", String(offset));
   if (start_date) params.set("start_date", start_date);

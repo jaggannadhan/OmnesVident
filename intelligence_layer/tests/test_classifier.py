@@ -15,7 +15,7 @@ from intelligence_layer.classifier import classify, classify_with_scores, CATEGO
     (
         "OpenAI releases new AI model with quantum computing capabilities",
         "The startup announced the software at Silicon Valley summit.",
-        "TECHNOLOGY",
+        "SCIENCE_TECH",
     ),
     (
         "Stock market hits record high as Fed cuts interest rates",
@@ -25,7 +25,7 @@ from intelligence_layer.classifier import classify, classify_with_scores, CATEGO
     (
         "Scientists discover new exoplanet orbiting distant star",
         "NASA researchers published the peer-reviewed findings on climate change.",
-        "SCIENCE",
+        "SCIENCE_TECH",
     ),
     (
         "WHO declares new pandemic as vaccine rollout begins",
@@ -45,7 +45,7 @@ from intelligence_layer.classifier import classify, classify_with_scores, CATEGO
     (
         "UN Security Council condemns military coup and civil unrest",
         "NATO called for ceasefire as troops crossed the border.",
-        "WORLD",
+        "ALL",
     ),
 ])
 def test_classify_category(title, snippet, expected):
@@ -60,9 +60,9 @@ def test_classify_category(title, snippet, expected):
 # Edge cases
 # ---------------------------------------------------------------------------
 
-def test_no_keyword_match_falls_back_to_world():
+def test_no_keyword_match_falls_back_to_all():
     result = classify("Untitled lorem ipsum dolor sit amet", "")
-    assert result == "WORLD"
+    assert result == "ALL"
 
 def test_title_weighted_higher_than_snippet():
     # Title is pure SPORTS, snippet is pure HEALTH — SPORTS should win (2× weight)

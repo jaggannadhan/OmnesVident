@@ -164,7 +164,7 @@ def _firestore_doc_to_story_out(doc: Dict[str, Any]) -> StoryOut:
         source_url=doc.get("source_url", ""),
         source_name=doc.get("source_name", ""),
         region_code=doc.get("region_code", ""),
-        category=doc.get("category", "WORLD"),
+        category=doc.get("category", "ALL"),
         mentioned_regions=doc.get("mentioned_regions") or [],
         secondary_sources=doc.get("secondary_sources") or [],
         timestamp=ts,

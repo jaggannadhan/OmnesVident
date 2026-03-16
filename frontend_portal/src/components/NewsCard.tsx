@@ -9,11 +9,10 @@ export const CATEGORY_META: Record<
   string,
   { label: string; icon: string; colorClass: string; bgClass: string }
 > = {
-  WORLD:         { label: "World",         icon: "🌐", colorClass: "text-category-world",         bgClass: "bg-category-world" },
+  ALL:           { label: "All",           icon: "🌐", colorClass: "text-category-world",         bgClass: "bg-category-world" },
   POLITICS:      { label: "Politics",      icon: "🏛️", colorClass: "text-category-politics",      bgClass: "bg-category-politics" },
-  TECHNOLOGY:    { label: "Technology",    icon: "⚡", colorClass: "text-category-technology",    bgClass: "bg-category-technology" },
+  SCIENCE_TECH:  { label: "Science & Tech",icon: "🔬", colorClass: "text-category-technology",    bgClass: "bg-category-technology" },
   BUSINESS:      { label: "Business",      icon: "📈", colorClass: "text-category-business",      bgClass: "bg-category-business" },
-  SCIENCE:       { label: "Science",       icon: "🔬", colorClass: "text-category-science",       bgClass: "bg-category-science" },
   HEALTH:        { label: "Health",        icon: "🩺", colorClass: "text-category-health",        bgClass: "bg-category-health" },
   ENTERTAINMENT: { label: "Entertainment", icon: "🎬", colorClass: "text-category-entertainment", bgClass: "bg-category-entertainment" },
   SPORTS:        { label: "Sports",        icon: "🏆", colorClass: "text-category-sports",        bgClass: "bg-category-sports" },
@@ -57,7 +56,7 @@ interface NewsCardProps {
 
 export function NewsCard({ story, onCategoryClick, onRegionClick }: NewsCardProps) {
   const [sourcesOpen, setSourcesOpen] = useState(false);
-  const meta = CATEGORY_META[story.category] ?? CATEGORY_META.WORLD;
+  const meta = CATEGORY_META[story.category] ?? CATEGORY_META.ALL;
   const hasAlternateSources = story.secondary_sources.length > 0;
 
   return (
