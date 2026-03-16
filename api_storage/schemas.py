@@ -57,6 +57,10 @@ class StoryOut(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
+    # Breaking News (Module 17)
+    is_breaking: bool = False
+    heat_score: int = 0
+
     model_config = {"from_attributes": True}
 
 

@@ -12,13 +12,13 @@ const CARD_DX   = 14;   // px  — matches translate(14px, ...)
 
 // ─── Category accent colours ──────────────────────────────────────────────────
 const CATEGORY_COLORS: Record<string, string> = {
-  WORLD:         "#38bdf8",
-  POLITICS:      "#f87171",
-  SCIENCE_TECH:  "#22d3ee",
-  BUSINESS:      "#34d399",
-  HEALTH:        "#6ee7b7",
-  ENTERTAINMENT: "#f472b6",
-  SPORTS:        "#fb923c",
+  WORLD:         "#a78bfa",  // Neon Violet
+  POLITICS:      "#facc15",  // Neon Yellow
+  SCIENCE_TECH:  "#4ade80",  // Neon Green
+  BUSINESS:      "#c084fc",  // Neon Purple
+  HEALTH:        "#22d3ee",  // Teal / Cyan
+  ENTERTAINMENT: "#f472b6",  // Neon Pink
+  SPORTS:        "#fb923c",  // Neon Orange
 };
 
 // ─── CardTethers ──────────────────────────────────────────────────────────────

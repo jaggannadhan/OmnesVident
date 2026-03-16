@@ -5,11 +5,68 @@ import { NewsGrid } from "./components/NewsGrid";
 import { WorldMap } from "./components/WorldMap";
 import { GlobeErrorBoundary } from "./components/visualizer/GlobeErrorBoundary";
 import { GlobeControls, type DateRange } from "./components/GlobeControls";
+import { BreakingNewsCarousel } from "./components/BreakingNewsCarousel";
+import { useNews } from "./hooks/useNews";
 
 // Lazy-load the heavy R3F bundle so it doesn't block the initial paint
 const GlobeScene = lazy(() =>
   import("./components/visualizer/GlobeScene").then((m) => ({ default: m.GlobeScene }))
 );
+
+// ---------------------------------------------------------------------------
+// GlobeWithCarousel — 70/30 layout: globe left, breaking carousel right
+// ---------------------------------------------------------------------------
+
+interface GlobeWithCarouselProps {
+  regionCode?: string;
+  category?: string;
+  dateRange: DateRange;
+}
+
+function GlobeWithCarousel({ regionCode, category, dateRange }: GlobeWithCarouselProps) {
+  const { data } = useNews({
+    region: regionCode,
+    category,
+    limit: 1000,
+    start_date: dateRange.start,
+    end_date: dateRange.end,
+  });
+  const breakingStories = (data?.stories ?? []).filter((s) => s.is_breaking);
+
+  return (
+    <div style={{ display: "flex", gap: "12px", alignItems: "stretch", height: "480px" }}>
+      {/* Globe — 70% or full width when no breaking stories */}
+      <div style={{ flex: breakingStories.length > 0 ? "0 0 70%" : "1 1 100%", minWidth: 0 }}>
+        <GlobeErrorBoundary>
+          <Suspense
+            fallback={
+              <div
+                className="w-full rounded-xl border border-rim bg-base flex items-center justify-center text-slate-600 text-xs font-mono"
+                style={{ height: "100%" }}
+              >
+                Loading 3D engine…
+              </div>
+            }
+          >
+            <GlobeScene
+              region={regionCode}
+              category={category}
+              startDate={dateRange.start}
+              endDate={dateRange.end}
+            />
+          </Suspense>
+        </GlobeErrorBoundary>
+      </div>
+
+      {/* Breaking News Carousel — 30%, only when breaking stories exist */}
+      {breakingStories.length > 0 && (
+        <div style={{ flex: "0 0 30%", minWidth: 0 }}>
+          <BreakingNewsCarousel stories={breakingStories} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Mobile menu icon
@@ -179,20 +236,14 @@ function FeedView() {
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
           <div className="max-w-7xl mx-auto flex flex-col gap-5">
 
-            {/* 3D Globe — hidden on small screens, toggleable */}
+            {/* 3D Globe + Breaking News Carousel — hidden on small screens, toggleable */}
             {globeOpen && (
               <div className="hidden md:block">
-                <GlobeErrorBoundary>
-                  <Suspense
-                    fallback={
-                      <div className="w-full rounded-xl border border-rim bg-base flex items-center justify-center text-slate-600 text-xs font-mono" style={{ height: 480 }}>
-                        Loading 3D engine…
-                      </div>
-                    }
-                  >
-                    <GlobeScene region={regionCode} category={category} startDate={dateRange.start} endDate={dateRange.end} />
-                  </Suspense>
-                </GlobeErrorBoundary>
+                <GlobeWithCarousel
+                  regionCode={regionCode}
+                  category={category}
+                  dateRange={dateRange}
+                />
               </div>
             )}
 

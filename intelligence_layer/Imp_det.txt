@@ -77,6 +77,99 @@ SUCCESSES
      dedup integration, category correctness)
 
 
+================================================================================
+  MODULE 17.0 — BREAKING NEWS PIPELINE: IMPLEMENTATION DETAILS
+  Date: 2026-03-16
+================================================================================
+
+OVERVIEW
+--------
+Adds real-time breaking news detection as a fourth layer in the AI Refiner
+pipeline. Each ingested story receives an `is_breaking` boolean and a
+`heat_score` (1–100) reflecting urgency and scale. Breaking stories are
+highlighted with red blips on the 3D globe and surfaced in a dedicated
+BreakingNewsCarousel beside the globe (70/30 layout).
+
+BACKEND CHANGES
+---------------
+1. intelligence_layer/refiner.py
+   - Added `_BREAKING_SYSTEM_PROMPT`: instructs gpt-4o-mini to evaluate each
+     story for urgency, mass-casualty risk, political crisis, or major
+     natural disaster and return {"is_breaking": bool, "heat_score": int}.
+   - Added `_build_breaking_prompt()`: builds numbered list of titles/snippets
+     for the breaking detection call.
+   - Added `AIRefiner._call_breaking()`: second concurrent OpenAI gpt-4o-mini
+     call per batch (runs in parallel with _call_geo via asyncio.gather).
+     Falls back to all-False/score-0 on any error — never blocks ingestion.
+   - Updated `process_buffer()`: calls _call_breaking concurrently alongside
+     _call_geo; writes `is_breaking` and `heat_score` into the `extra` dict
+     promoted to Firestore master_news.
+   - Updated `refine_master_news()`: same — breaking fields added to patch
+     written back to existing master_news docs.
+
+   Breaking classification criteria (is_breaking = true):
+     - Active armed conflict escalation, mass-casualty incidents, major attacks
+     - Significant natural disasters in progress (quake ≥6.0, active hurricane)
+     - Sudden government collapse or major political crisis
+     - Global financial shock (circuit breakers, sovereign default)
+     - National/international medical emergency declared
+   heat_score bands:
+     90–100 : catastrophic / global emergency
+     70–89  : high-impact national event
+     40–69  : notable regional story
+     1–39   : routine / low-urgency news
+
+2. api_storage/schemas.py
+   - Added `is_breaking: bool = False` and `heat_score: int = 0` to StoryOut.
+   - Both default to safe fallback so existing docs without these fields
+     continue to deserialize correctly.
+
+3. api_storage/routes.py
+   - `_firestore_doc_to_story_out`: reads `is_breaking` and `heat_score` from
+     Firestore doc with safe defaults (False / 0).
+
+FRONTEND CHANGES
+----------------
+4. frontend_portal/src/services/api.ts
+   - Added `is_breaking: boolean` and `heat_score: number` to StoryOut interface.
+
+5. frontend_portal/src/components/visualizer/Marker.tsx
+   - Breaking stories use color `#FF2020` (bright red) instead of category color.
+   - emissiveIntensity overridden to 5.0 for breaking stories → intense red glow
+     visible through Earth's surface.
+
+6. frontend_portal/src/components/BreakingNewsCarousel.tsx  (new file)
+   - Filters stories to `is_breaking === true`, sorts by heat_score desc then
+     timestamp desc.
+   - Auto-advances every 6 seconds; manual dot + arrow navigation.
+   - HeatBar component: 3px gradient bar coloured red/orange/yellow/green by
+     score band; shows numeric score.
+   - Pulsing red dot in header, category badge, region code, relative time,
+     source name, clipped title + snippet, "Read full story ↗" link.
+   - Component renders null when no breaking stories exist.
+
+7. frontend_portal/src/App.tsx
+   - Added `GlobeWithCarousel` component: fetches the same useNews query as
+     GlobeScene (React Query deduplicates the network request); filters to
+     breaking stories; renders a flex row with globe at flex 70% and carousel
+     at flex 30%. When no breaking stories exist, globe occupies 100% width.
+   - `FeedView` globe section replaced with `<GlobeWithCarousel>`.
+
+ARCHITECTURE NOTES
+------------------
+- Concurrency: _call_geo and _call_breaking run as concurrent OpenAI requests
+  via asyncio.gather — adds ~0 extra latency per batch (both complete in
+  roughly the same time as the existing single call).
+- Fallback safety: _call_breaking always returns a list of the correct length.
+  A total API failure returns all-False/score-0, so normal ingestion is never
+  blocked by breaking detection errors.
+- Zero new Firestore collections: is_breaking and heat_score are stored as
+  fields directly on existing master_news documents.
+- No double fetches: GlobeWithCarousel reuses the same React Query cache key
+  as GlobeScene (same region/category/limit/dates), so only one network request
+  is made even though two components call useNews.
+
+
 FAILURES / BLOCKERS
 -------------------
 1. Classifier has no cross-category disambiguation training

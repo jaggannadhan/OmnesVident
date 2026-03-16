@@ -171,6 +171,8 @@ def _firestore_doc_to_story_out(doc: Dict[str, Any]) -> StoryOut:
         processed_at=promoted,
         latitude=doc.get("latitude"),
         longitude=doc.get("longitude"),
+        is_breaking=bool(doc.get("is_breaking", False)),
+        heat_score=int(doc.get("heat_score") or 0),
     )
 
 

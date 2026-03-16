@@ -154,6 +154,41 @@ Script-hint rules (each story may carry a [script_hint=XX] tag):
   regional prior and rely on named entities to narrow it down.
 """
 
+_BREAKING_SYSTEM_PROMPT = """\
+You are a breaking-news classifier for a global news aggregation system.
+
+Given a numbered list of news story titles and snippets (always in English),
+assess each story for urgency, scale, and immediate public impact.
+
+Return ONLY a valid JSON array with one object per story IN THE SAME ORDER as
+the input.  Each object must have exactly these keys:
+
+  "is_breaking" : true if the story qualifies as breaking news, false otherwise
+  "heat_score"  : integer 1–100 representing urgency and impact
+                    90–100 = catastrophic / global emergency (war, mass casualty,
+                             major market crash, major natural disaster)
+                    70–89  = high-impact national event (political crisis, major
+                             attack, significant election result)
+                    40–69  = notable regional story (regional disaster, major arrest,
+                             significant policy change)
+                    1–39   = routine / low-urgency news
+
+Breaking news criteria (is_breaking = true):
+  - Active armed conflict escalation, mass-casualty incidents, or major terrorist attacks
+  - Major natural disasters in progress (earthquake ≥ 6.0, active hurricane, etc.)
+  - Sudden collapse or significant change of government
+  - Major global financial shock (circuit breakers triggered, sovereign default)
+  - Medical emergency declared at national or international scale
+  - Any story where immediate public action or awareness is critical
+
+Do NOT mark as breaking:
+  - Ongoing multi-week stories with no new development
+  - Routine political announcements, sports results, entertainment news
+  - Stories covered in the last cycle without escalation
+
+Do NOT add markdown fences, code blocks, or explanation — only the JSON array.
+"""
+
 _TRANSLATE_SYSTEM_PROMPT = """\
 You are a news translator. Translate each numbered news item to English.
 
@@ -165,6 +200,16 @@ Rules:
   - Keep the translation concise and journalistic in tone.
   - Do NOT add markdown fences or explanation — only the JSON array.
 """
+
+
+def _build_breaking_prompt(stories: List[Dict[str, Any]]) -> str:
+    lines = ["Classify each story for breaking-news status:\n"]
+    for i, s in enumerate(stories, 1):
+        lines.append(
+            f"[{i}] title: {s.get('title', '')[:180]}"
+            f" | snippet: {s.get('snippet', '')[:250]}"
+        )
+    return "\n".join(lines)
 
 
 def _build_prompt(stories: List[Dict[str, Any]]) -> str:
@@ -407,6 +452,51 @@ class AIRefiner:
     # Keep legacy name so existing callers don't break
     _call_gemini = _call_geo
 
+    # ── Layer 4: breaking-news detection call ────────────────────────────────
+
+    async def _call_breaking(
+        self, stories: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Call OpenAI gpt-4o-mini to classify each story as breaking news and
+        assign a heat_score 1–100.  Returns a list of dicts with
+        {"is_breaking": bool, "heat_score": int} per story.
+        Falls back to all-False/score-0 on any error.
+        """
+        client = self._get_client()
+        if client is None:
+            return [{"is_breaking": False, "heat_score": 0}] * len(stories)
+
+        prompt = _build_breaking_prompt(stories)
+        try:
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    temperature=0,
+                    max_tokens=1024,
+                    messages=[
+                        {"role": "system", "content": _BREAKING_SYSTEM_PROMPT},
+                        {"role": "user",   "content": prompt},
+                    ],
+                ),
+            )
+            text    = response.choices[0].message.content or ""
+            results = _parse_json(text)
+            if len(results) != len(stories):
+                logger.warning(
+                    "AIRefiner._call_breaking: got %d results for %d stories.",
+                    len(results), len(stories),
+                )
+                # Pad or truncate to match story count
+                while len(results) < len(stories):
+                    results.append({"is_breaking": False, "heat_score": 0})
+            return results
+        except Exception as exc:
+            logger.warning("AIRefiner._call_breaking: failed — %s", exc)
+            return [{"is_breaking": False, "heat_score": 0}] * len(stories)
+
     # ── Per-story geo resolution ──────────────────────────────────────────────
 
     async def _resolve(
@@ -508,12 +598,15 @@ class AIRefiner:
             # Layer 1+2: detect scripts, translate non-English
             en_inputs = await self._translate_batch(raw_inputs)
 
-            # Layer 3: geo-resolve on English text with script hints
-            ai_results = await self._call_geo(en_inputs)
+            # Layer 3: geo-resolve + Layer 4: breaking detection (concurrent)
+            ai_results, breaking_results = await asyncio.gather(
+                self._call_geo(en_inputs),
+                self._call_breaking(en_inputs),
+            )
             while len(ai_results) < len(batch):
                 ai_results.append({})
 
-            for doc, en_input, ai_result in zip(batch, en_inputs, ai_results):
+            for doc, en_input, ai_result, brk_result in zip(batch, en_inputs, ai_results, breaking_results):
                 doc_id = doc.get("_doc_id", "")
                 try:
                     region_code, lat, lng, confidence = await self._resolve(
@@ -523,6 +616,9 @@ class AIRefiner:
                     # Classify using the (possibly translated) English text
                     category = classify(en_input["title"], en_input.get("snippet", ""))
 
+                    is_breaking = bool(brk_result.get("is_breaking", False))
+                    heat_score  = int(max(0, min(100, brk_result.get("heat_score", 0) or 0)))
+
                     patch: Dict[str, Any] = {
                         "region_code":    region_code,
                         "latitude":       lat,
@@ -530,6 +626,8 @@ class AIRefiner:
                         "geo_confidence": round(confidence, 3),
                         "geo_source":     "openai-gpt4o-mini",
                         "category":       category,
+                        "is_breaking":    is_breaking,
+                        "heat_score":     heat_score,
                     }
                     # Also store English title/snippet when translation occurred
                     if en_input.get("_translated"):
@@ -609,12 +707,16 @@ class AIRefiner:
             en_inputs = await self._translate_batch(raw_inputs)
 
             # Layer 3: geo-resolve on English text
-            ai_results = await self._call_geo(en_inputs)
+            # Layer 4: breaking-news detection (runs concurrently with geo)
+            ai_results, breaking_results = await asyncio.gather(
+                self._call_geo(en_inputs),
+                self._call_breaking(en_inputs),
+            )
             while len(ai_results) < len(batch):
                 ai_results.append({})
 
-            for doc, raw_input, en_input, ai_result in zip(
-                batch, raw_inputs, en_inputs, ai_results
+            for doc, raw_input, en_input, ai_result, brk_result in zip(
+                batch, raw_inputs, en_inputs, ai_results, breaking_results
             ):
                 doc_id = doc.get("_doc_id", "")
                 raw    = doc.get("raw_payload", {})
@@ -648,12 +750,17 @@ class AIRefiner:
                     category = classify(event.title, event.snippet)
                     ts       = event.timestamp or datetime.now(tz=timezone.utc)
 
+                    is_breaking = bool(brk_result.get("is_breaking", False))
+                    heat_score  = int(max(0, min(100, brk_result.get("heat_score", 0) or 0)))
+
                     extra: Dict[str, Any] = {
                         "latitude":       lat,
                         "longitude":      lng,
                         "geo_confidence": round(confidence, 3),
                         "geo_source":     "openai-gpt4o-mini",
                         "category":       category,
+                        "is_breaking":    is_breaking,
+                        "heat_score":     heat_score,
                     }
                     # Preserve original non-English title for reference
                     if en_input.get("_translated"):

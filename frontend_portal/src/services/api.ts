@@ -21,6 +21,8 @@ export interface StoryOut {
   processed_at: string;
   latitude: number | null;
   longitude: number | null;
+  is_breaking: boolean;
+  heat_score: number;
 }
 
 export interface PaginatedStoriesResponse {

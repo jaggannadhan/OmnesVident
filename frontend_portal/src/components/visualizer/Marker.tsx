@@ -7,13 +7,13 @@ import type { StoryOut } from "../../services/api";
 
 /** Map category → hex colour per the A&D spec + extended palette */
 export const CATEGORY_COLORS: Record<string, string> = {
-  WORLD:         "#FF2E2E",
-  POLITICS:      "#F59E0B",
-  SCIENCE_TECH:  "#2E90FF",
-  BUSINESS:      "#10B981",
-  HEALTH:        "#34D399",
-  ENTERTAINMENT: "#EC4899",
-  SPORTS:        "#F97316",
+  WORLD:         "#A78BFA",  // Neon Violet
+  POLITICS:      "#FACC15",  // Neon Yellow
+  SCIENCE_TECH:  "#4ADE80",  // Neon Green
+  BUSINESS:      "#C084FC",  // Neon Purple
+  HEALTH:        "#22D3EE",  // Teal / Cyan
+  ENTERTAINMENT: "#F472B6",  // Neon Pink
+  SPORTS:        "#FB923C",  // Neon Orange
 };
 
 interface MarkerProps {
@@ -46,7 +46,7 @@ export const Marker = memo(function Marker({
     [story.dedup_group_id]
   );
 
-  const color = CATEGORY_COLORS[story.category] ?? "#ffffff";
+  const color = story.is_breaking ? "#FF2020" : (CATEGORY_COLORS[story.category] ?? "#ffffff");
 
   // Scale dot size down as more stories share the same region; min 0.012
   const baseRadius = useMemo(
@@ -105,7 +105,7 @@ export const Marker = memo(function Marker({
         <meshStandardMaterial
           color={color}
           emissive={color}
-          emissiveIntensity={dimmed ? 0 : Math.min(2.5, Math.max(0, (regionCount - 1) * 0.5))}
+          emissiveIntensity={dimmed ? 0 : story.is_breaking ? 5.0 : Math.min(2.5, Math.max(0, (regionCount - 1) * 0.5))}
           transparent={dimmed}
           opacity={alpha}
         />
