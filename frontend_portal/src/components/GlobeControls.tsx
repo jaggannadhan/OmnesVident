@@ -1,12 +1,12 @@
 /**
  * GlobeControls — time-range selector for the 3D globe and news grid.
  *
- * Presets compute ISO-8601 start/end strings relative to "now".
- * A /news/coverage fetch tells us the oldest available document date so we
- * can grey out presets that fall entirely before the data window begins.
+ * Presets: Today · Week · Month
+ * Range:   dropdown (portal, fixed-position) with From + optional To date
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
@@ -16,7 +16,7 @@ const BASE_URL =
 // ---------------------------------------------------------------------------
 
 interface Coverage {
-  oldest: string | null;   // ISO-8601 or null
+  oldest: string | null;
   newest: string | null;
   total: number;
 }
@@ -34,7 +34,7 @@ async function fetchCoverage(): Promise<Coverage> {
 }
 
 // ---------------------------------------------------------------------------
-// Presets
+// Helpers
 // ---------------------------------------------------------------------------
 
 export interface DateRange {
@@ -42,46 +42,54 @@ export interface DateRange {
   end: string | undefined;
 }
 
-interface Preset {
-  label: string;
-  /** short description shown in tooltip */
-  description: string;
-  range: () => DateRange;
+function todayMidnight(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
 }
 
-function isoMinus(hours: number): string {
-  return new Date(Date.now() - hours * 3_600_000).toISOString();
+function daysAgoMidnight(days: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
 }
 
-const PRESETS: Preset[] = [
+function toDateInputValue(iso: string): string {
+  return iso.slice(0, 10);
+}
+
+function endOfDay(yyyy_mm_dd: string): string {
+  return new Date(`${yyyy_mm_dd}T23:59:59`).toISOString();
+}
+
+// ---------------------------------------------------------------------------
+// Presets
+// ---------------------------------------------------------------------------
+
+type PresetKey = "today" | "week" | "month";
+
+const PRESETS: { key: PresetKey; label: string; description: string; range: () => DateRange }[] = [
   {
-    label: "Live",
-    description: "Last 24 hours",
-    range: () => ({ start: isoMinus(24), end: undefined }),
-  },
-  {
+    key: "today",
     label: "Today",
-    description: "Since midnight (local)",
+    description: "All news today (midnight to end of day)",
     range: () => {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      return { start: d.toISOString(), end: undefined };
+      const today = toDateInputValue(new Date().toISOString());
+      return { start: todayMidnight(), end: endOfDay(today) };
     },
   },
   {
-    label: "Yesterday",
-    description: "48 h → 24 h ago",
-    range: () => ({ start: isoMinus(48), end: isoMinus(24) }),
-  },
-  {
-    label: "3 Days",
-    description: "Last 72 hours",
-    range: () => ({ start: isoMinus(72), end: undefined }),
-  },
-  {
+    key: "week",
     label: "Week",
     description: "Last 7 days",
-    range: () => ({ start: isoMinus(168), end: undefined }),
+    range: () => ({ start: daysAgoMidnight(7), end: undefined }),
+  },
+  {
+    key: "month",
+    label: "Month",
+    description: "Last 30 days",
+    range: () => ({ start: daysAgoMidnight(30), end: undefined }),
   },
 ];
 
@@ -89,70 +97,211 @@ const PRESETS: Preset[] = [
 // Component
 // ---------------------------------------------------------------------------
 
-interface GlobeControlsProps {
+export interface GlobeControlsProps {
   value: DateRange;
   onChange: (range: DateRange) => void;
 }
 
-export function GlobeControls({ value, onChange }: GlobeControlsProps) {
+export function GlobeControls({ onChange }: GlobeControlsProps) {
   const [coverage, setCoverage] = useState<Coverage | null>(null);
+  const [activePreset, setActivePreset] = useState<PresetKey | "custom">("today");
+
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
+  const [customFrom, setCustomFrom] = useState<string>(() => toDateInputValue(daysAgoMidnight(7)));
+  const [toEnabled, setToEnabled] = useState(false);
+  const [customTo, setCustomTo] = useState<string>("");
+
+  const rangeButtonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchCoverage().then(setCoverage);
   }, []);
 
-  const oldestMs = coverage?.oldest ? new Date(coverage.oldest).getTime() : null;
-
-  function isGhosted(preset: Preset): boolean {
-    if (!oldestMs) return false;
-    const { end } = preset.range();
-    // Ghost if the preset window ends before the oldest available doc
-    if (end) {
-      return new Date(end).getTime() < oldestMs;
+  // Close on outside click
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node;
+      const inButton = rangeButtonRef.current?.contains(target);
+      const inDropdown = dropdownRef.current?.contains(target);
+      if (!inButton && !inDropdown) setDropdownOpen(false);
     }
-    return false;
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [dropdownOpen]);
+
+  function handlePreset(preset: (typeof PRESETS)[number]) {
+    setActivePreset(preset.key);
+    setDropdownOpen(false);
+    onChange(preset.range());
   }
 
-  function isActive(preset: Preset): boolean {
-    const { start, end } = preset.range();
-    return value.start === start && value.end === end;
+  /** Compute the effective end ISO given current To state. */
+  function effectiveEnd(from: string, toChecked: boolean, to: string): string | undefined {
+    if (toChecked && to) return endOfDay(to);
+    // From-only → single day: end at 23:59:59 of the From date
+    return from ? endOfDay(from) : undefined;
   }
+
+  function toggleDropdown() {
+    if (!dropdownOpen) {
+      const rect = rangeButtonRef.current?.getBoundingClientRect();
+      if (rect) {
+        setDropdownPos({
+          top: rect.bottom + 6,
+          right: window.innerWidth - rect.right,
+        });
+      }
+      setActivePreset("custom");
+      const from = customFrom || toDateInputValue(daysAgoMidnight(7));
+      const fromIso = new Date(`${from}T00:00:00`).toISOString();
+      onChange({ start: fromIso, end: effectiveEnd(from, toEnabled, customTo) });
+    }
+    setDropdownOpen((o) => !o);
+  }
+
+  function handleFromChange(val: string) {
+    setCustomFrom(val);
+    if (!val) return;
+    onChange({
+      start: new Date(`${val}T00:00:00`).toISOString(),
+      end: effectiveEnd(val, toEnabled, customTo),
+    });
+  }
+
+  function handleToEnabledChange(checked: boolean) {
+    setToEnabled(checked);
+    if (!checked) {
+      setCustomTo("");
+      const from = customFrom || toDateInputValue(daysAgoMidnight(7));
+      onChange({
+        start: new Date(`${from}T00:00:00`).toISOString(),
+        end: effectiveEnd(from, false, ""),
+      });
+    }
+  }
+
+  function handleToChange(val: string) {
+    setCustomTo(val);
+    const from = customFrom || toDateInputValue(daysAgoMidnight(7));
+    onChange({
+      start: new Date(`${from}T00:00:00`).toISOString(),
+      end: effectiveEnd(from, true, val),
+    });
+  }
+
+  const oldestDateStr = coverage?.oldest ? toDateInputValue(coverage.oldest) : undefined;
+  const todayStr = toDateInputValue(new Date().toISOString());
+
+  const btnBase = "text-[10px] font-mono px-2 py-0.5 rounded border transition-colors";
+  const btnActive = "border-cyan-500/60 text-cyan-300 bg-cyan-400/10";
+  const btnIdle = "border-rim text-slate-400 hover:text-slate-200 hover:border-rim-bright";
+
+  const dropdown = dropdownOpen ? createPortal(
+    <div
+      ref={dropdownRef}
+      style={{
+        position: "fixed",
+        top: dropdownPos.top,
+        right: dropdownPos.right,
+        zIndex: 9999,
+      }}
+      className="min-w-[220px] rounded-lg border border-rim bg-[rgba(8,10,24,0.97)] shadow-2xl p-4 flex flex-col gap-3"
+    >
+      {/* From */}
+      <div className="flex flex-col gap-1">
+        <label className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">
+          From
+        </label>
+        <input
+          autoFocus
+          type="date"
+          value={customFrom}
+          min={oldestDateStr}
+          max={toEnabled && customTo ? customTo : todayStr}
+          onChange={(e) => handleFromChange(e.target.value)}
+          className="text-[11px] font-mono bg-slate-800/60 border border-rim rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-500/60 focus:text-cyan-300 cursor-pointer w-full"
+        />
+      </div>
+
+      {/* To toggle */}
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={toEnabled}
+            onChange={(e) => handleToEnabledChange(e.target.checked)}
+            className="accent-cyan-400 w-3 h-3 cursor-pointer"
+          />
+          <span className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">
+            Set end date
+          </span>
+        </label>
+
+        {toEnabled && (
+          <input
+            type="date"
+            value={customTo}
+            min={customFrom || oldestDateStr}
+            max={todayStr}
+            onChange={(e) => handleToChange(e.target.value)}
+            className="text-[11px] font-mono bg-slate-800/60 border border-rim rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-500/60 focus:text-cyan-300 cursor-pointer w-full"
+          />
+        )}
+      </div>
+
+      {/* Apply */}
+      <button
+        onClick={() => setDropdownOpen(false)}
+        className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-cyan-400 hover:text-cyan-200 transition-colors self-end"
+      >
+        Apply ✓
+      </button>
+    </div>,
+    document.body
+  ) : null;
 
   return (
     <div className="flex items-center gap-1.5" role="group" aria-label="Time range">
+
       {/* Coverage badge */}
-      {coverage && coverage.oldest && (
+      {coverage?.oldest && (
         <span
           className="hidden lg:inline text-[9px] font-mono text-slate-600 mr-1 whitespace-nowrap"
-          title={`Oldest data: ${new Date(coverage.oldest).toLocaleDateString()}`}
+          title={`Oldest available data: ${new Date(coverage.oldest).toLocaleDateString()}`}
         >
-          Data from {new Date(coverage.oldest).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+          From {new Date(coverage.oldest).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
         </span>
       )}
 
-      {PRESETS.map((preset) => {
-        const ghosted = isGhosted(preset);
-        const active = isActive(preset);
-        return (
-          <button
-            key={preset.label}
-            title={ghosted ? `No data for "${preset.description}"` : preset.description}
-            disabled={ghosted}
-            onClick={() => !ghosted && onChange(preset.range())}
-            aria-pressed={active}
-            className={[
-              "text-[10px] font-mono px-2 py-0.5 rounded border transition-colors",
-              active
-                ? "border-cyan-500/60 text-cyan-300 bg-cyan-400/10"
-                : ghosted
-                ? "border-rim/30 text-slate-700 cursor-not-allowed opacity-40"
-                : "border-rim text-slate-400 hover:text-slate-200 hover:border-rim-bright",
-            ].join(" ")}
-          >
-            {preset.label}
-          </button>
-        );
-      })}
+      {/* Preset buttons */}
+      {PRESETS.map((preset) => (
+        <button
+          key={preset.key}
+          title={preset.description}
+          onClick={() => handlePreset(preset)}
+          aria-pressed={activePreset === preset.key}
+          className={`${btnBase} ${activePreset === preset.key ? btnActive : btnIdle}`}
+        >
+          {preset.label}
+        </button>
+      ))}
+
+      {/* Range button */}
+      <button
+        ref={rangeButtonRef}
+        onClick={toggleDropdown}
+        aria-pressed={activePreset === "custom"}
+        aria-expanded={dropdownOpen}
+        title="Pick a custom date range"
+        className={`${btnBase} ${activePreset === "custom" ? btnActive : btnIdle}`}
+      >
+        Range {dropdownOpen ? "▲" : "▼"}
+      </button>
+
+      {dropdown}
     </div>
   );
 }

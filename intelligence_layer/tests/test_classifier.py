@@ -45,7 +45,7 @@ from intelligence_layer.classifier import classify, classify_with_scores, CATEGO
     (
         "UN Security Council condemns military coup and civil unrest",
         "NATO called for ceasefire as troops crossed the border.",
-        "ALL",
+        "WORLD",
     ),
 ])
 def test_classify_category(title, snippet, expected):
@@ -60,9 +60,9 @@ def test_classify_category(title, snippet, expected):
 # Edge cases
 # ---------------------------------------------------------------------------
 
-def test_no_keyword_match_falls_back_to_all():
+def test_no_keyword_match_falls_back_to_world():
     result = classify("Untitled lorem ipsum dolor sit amet", "")
-    assert result == "ALL"
+    assert result == "WORLD"
 
 def test_title_weighted_higher_than_snippet():
     # Title is pure SPORTS, snippet is pure HEALTH — SPORTS should win (2× weight)

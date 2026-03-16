@@ -39,9 +39,13 @@ function FeedView() {
   const [offset, setOffset] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [globeOpen, setGlobeOpen] = useState(true);
-  const [dateRange, setDateRange] = useState<DateRange>({
-    start: undefined, // defaults to last 24 h on the backend
-    end: undefined,
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
+    // Default: full day today (midnight → 23:59:59 local)
+    const d = new Date();
+    const yyyy_mm_dd = d.toISOString().slice(0, 10);
+    d.setHours(0, 0, 0, 0);
+    const endD = new Date(`${yyyy_mm_dd}T23:59:59`);
+    return { start: d.toISOString(), end: endD.toISOString() };
   });
 
   const handleRegionSelect = useCallback(

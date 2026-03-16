@@ -9,7 +9,7 @@ export const CATEGORY_META: Record<
   string,
   { label: string; icon: string; colorClass: string; bgClass: string }
 > = {
-  ALL:           { label: "All",           icon: "🌐", colorClass: "text-category-world",         bgClass: "bg-category-world" },
+  WORLD:         { label: "World",         icon: "🌐", colorClass: "text-category-world",         bgClass: "bg-category-world" },
   POLITICS:      { label: "Politics",      icon: "🏛️", colorClass: "text-category-politics",      bgClass: "bg-category-politics" },
   SCIENCE_TECH:  { label: "Science & Tech",icon: "🔬", colorClass: "text-category-technology",    bgClass: "bg-category-technology" },
   BUSINESS:      { label: "Business",      icon: "📈", colorClass: "text-category-business",      bgClass: "bg-category-business" },
@@ -56,7 +56,7 @@ interface NewsCardProps {
 
 export function NewsCard({ story, onCategoryClick, onRegionClick }: NewsCardProps) {
   const [sourcesOpen, setSourcesOpen] = useState(false);
-  const meta = CATEGORY_META[story.category] ?? CATEGORY_META.ALL;
+  const meta = CATEGORY_META[story.category] ?? CATEGORY_META.WORLD;
   const hasAlternateSources = story.secondary_sources.length > 0;
 
   return (

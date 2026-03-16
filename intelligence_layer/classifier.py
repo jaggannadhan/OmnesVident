@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 CATEGORIES = [
-    "ALL",
+    "WORLD",
     "POLITICS",
     "SCIENCE_TECH",
     "BUSINESS",
@@ -31,7 +31,7 @@ CATEGORIES = [
     "SPORTS",
 ]
 
-FALLBACK_CATEGORY = "ALL"
+FALLBACK_CATEGORY = "WORLD"
 
 # Each entry: (keyword_pattern, score)
 # Higher score = stronger signal.  Patterns are compiled as whole-word
@@ -163,7 +163,7 @@ _RAW_RULES: Dict[str, List[Tuple[str, int]]] = {
         (r"formula\s+1|f1\b|grand\s+prix", 3),
         (r"marathon|triathlon|cycling\s+race", 2),
     ],
-    "ALL": [
+    "WORLD": [
         (r"war|conflict|ceasefire", 3),
         (r"military|troops|soldier", 2),
         (r"refugee|migrant|asylum", 2),
@@ -201,7 +201,7 @@ def classify(title: str, snippet: str = "") -> str:
     - Matches in the snippet are weighted ×1.
     - The category with the highest total score wins.
     - Ties are resolved alphabetically (deterministic).
-    - Falls back to ALL if no keywords match at all.
+    - Falls back to WORLD if no keywords match at all.
     """
     text_title = title.lower()
     text_snippet = snippet.lower()
@@ -218,7 +218,7 @@ def classify(title: str, snippet: str = "") -> str:
     best_category = max(scores, key=lambda c: (scores[c], c))
 
     if scores[best_category] == 0:
-        logger.debug("No keyword match for: '%s' — defaulting to %s", title[:80], FALLBACK_CATEGORY)
+        logger.debug("No keyword match for '%s' — defaulting to %s", title[:80], FALLBACK_CATEGORY)
         return FALLBACK_CATEGORY
 
     return best_category

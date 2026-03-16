@@ -7,7 +7,7 @@ import type { StoryOut } from "../../services/api";
 
 /** Map category → hex colour per the A&D spec + extended palette */
 export const CATEGORY_COLORS: Record<string, string> = {
-  ALL:           "#FF2E2E",
+  WORLD:         "#FF2E2E",
   POLITICS:      "#F59E0B",
   SCIENCE_TECH:  "#2E90FF",
   BUSINESS:      "#10B981",
