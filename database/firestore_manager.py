@@ -337,6 +337,7 @@ class FirestoreManager:
     async def query_master_by_timestamp(
         self,
         region_code: Optional[str] = None,
+        category: Optional[str] = None,
         start_dt: Optional[datetime] = None,
         end_dt: Optional[datetime] = None,
         limit: int = 50,
@@ -362,6 +363,8 @@ class FirestoreManager:
             q = client.collection(_MASTER_COLLECTION)
             if region_code:
                 q = q.where("region_code", "==", region_code.upper())
+            if category:
+                q = q.where("category", "==", category.upper())
             if start_dt:
                 q = q.where("timestamp", ">=", start_dt)
             if end_dt:
@@ -386,6 +389,7 @@ class FirestoreManager:
     async def count_master_by_timestamp(
         self,
         region_code: Optional[str] = None,
+        category: Optional[str] = None,
         start_dt: Optional[datetime] = None,
         end_dt: Optional[datetime] = None,
     ) -> int:
@@ -405,6 +409,8 @@ class FirestoreManager:
             q = client.collection(_MASTER_COLLECTION)
             if region_code:
                 q = q.where("region_code", "==", region_code.upper())
+            if category:
+                q = q.where("category", "==", category.upper())
             if start_dt:
                 q = q.where("timestamp", ">=", start_dt)
             if end_dt:

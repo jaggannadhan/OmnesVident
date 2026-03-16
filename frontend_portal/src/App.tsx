@@ -38,6 +38,7 @@ function FeedView() {
   const [category, setCategory] = useState<string | undefined>();
   const [offset, setOffset] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [globeOpen, setGlobeOpen] = useState(true);
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     // Default: full day today (midnight → 23:59:59 local)
@@ -87,10 +88,11 @@ function FeedView() {
 
       <nav
         className={`
-          fixed top-0 left-0 z-50 h-full w-64 bg-surface border-r border-rim
-          transform transition-transform duration-200 ease-out
-          lg:relative lg:translate-x-0 lg:flex lg:flex-col
-          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
+          fixed top-0 left-0 z-50 h-full bg-surface border-r border-rim
+          transform transition-all duration-200 ease-out overflow-hidden
+          lg:relative lg:translate-x-0 lg:flex lg:flex-col lg:shrink-0
+          ${sidebarOpen ? "translate-x-0 w-64" : "-translate-x-full w-64"}
+          ${sidebarCollapsed ? "lg:w-0 lg:border-r-0" : "lg:w-64 lg:translate-x-0"}
         `}
         aria-label="Navigation"
       >
@@ -107,6 +109,22 @@ function FeedView() {
 
         {/* Top bar */}
         <header className="flex items-center gap-3 px-4 py-3 border-b border-rim bg-surface/80 backdrop-blur-sm shrink-0">
+          {/* Desktop sidebar collapse toggle */}
+          <button
+            onClick={() => setSidebarCollapsed((p) => !p)}
+            className="hidden lg:flex p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-panel transition-colors shrink-0"
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5" aria-hidden="true">
+              {sidebarCollapsed ? (
+                <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+              ) : (
+                <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+              )}
+            </svg>
+          </button>
+
           {/* Mobile menu toggle */}
           <button
             onClick={() => setSidebarOpen((p) => !p)}

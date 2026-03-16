@@ -176,6 +176,7 @@ def _firestore_doc_to_story_out(doc: Dict[str, Any]) -> StoryOut:
 
 async def _query_firestore(
     region: Optional[str],
+    category: Optional[str],
     start_date: Optional[datetime],
     end_date: Optional[datetime],
     limit: int,
@@ -195,6 +196,7 @@ async def _query_firestore(
         docs, total = await asyncio.gather(
             firestore_manager.query_master_by_timestamp(
                 region_code=region,
+                category=category,
                 start_dt=start_date,
                 end_dt=end_date,
                 limit=limit,
@@ -202,6 +204,7 @@ async def _query_firestore(
             ),
             firestore_manager.count_master_by_timestamp(
                 region_code=region,
+                category=category,
                 start_dt=start_date,
                 end_dt=end_date,
             ),
@@ -269,6 +272,7 @@ async def list_news(
     # Try Firestore first (persistent, survives container restarts)
     fs_result = await _query_firestore(
         region=region,
+        category=category,
         start_date=effective_start,
         end_date=effective_end,
         limit=limit,
@@ -314,6 +318,7 @@ async def list_news_by_region(
 
     fs_result = await _query_firestore(
         region=region_code.upper(),
+        category=category,
         start_date=effective_start,
         end_date=effective_end,
         limit=limit,
