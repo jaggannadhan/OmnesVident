@@ -1,7 +1,11 @@
 .PHONY: help setup setup-py setup-frontend \
         api ingest frontend run-be run-fe \
         test test-ingestion test-intelligence test-api \
+        deploy-be deploy-fe refine-all \
         all stop
+
+CLOUD_RUN_URL  ?= https://omnesvident-api-naqkmfs2qa-uc.a.run.app
+INGEST_SECRET  ?= $(shell grep INGEST_SECRET .env | cut -d= -f2)
 
 PYTHON  := .venv/bin/python
 PIP     := .venv/bin/pip
@@ -33,6 +37,11 @@ help:
 	@echo "    make test-ingestion     Module 1 tests only"
 	@echo "    make test-intelligence  Module 2 tests only"
 	@echo "    make test-api           Module 3 tests only"
+	@echo ""
+	@echo "  Deploy"
+	@echo "    make deploy-be      Build + deploy backend to Cloud Run"
+	@echo "    make deploy-fe      Deploy frontend to Vercel"
+	@echo "    make refine-all     Backfill is_breaking/heat_score on all Firestore docs"
 	@echo ""
 	@echo "  Env vars (optional)"
 	@echo "    NEWSDATA_API_KEY    API key for newsdata.io (falls back to mock data)"
@@ -83,6 +92,30 @@ ingest:
 
 frontend:
 	cd frontend_portal && $(NPM) run dev
+
+# ─────────────────────────────────────────────
+# Deploy
+# ─────────────────────────────────────────────
+
+deploy-be:
+	@echo "→ Building and deploying backend to Cloud Run…"
+	gcloud run deploy omnesvident-api \
+		--source . \
+		--region us-central1 \
+		--allow-unauthenticated
+	@echo "✓ Backend deployed."
+
+deploy-fe:
+	@echo "→ Deploying frontend to Vercel…"
+	cd frontend_portal && npx vercel --prod
+	@echo "✓ Frontend deployed."
+
+refine-all:
+	@echo "→ Triggering full geo + breaking-news re-refinement on $(CLOUD_RUN_URL)…"
+	@curl -s -X POST "$(CLOUD_RUN_URL)/tasks/refine-all" \
+		-H "X-Ingest-Token: $(INGEST_SECRET)" \
+		-H "Content-Type: application/json" | python3 -m json.tool
+	@echo "✓ Refinement queued (runs in background on Cloud Run)."
 
 # ─────────────────────────────────────────────
 # Test
