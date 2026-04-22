@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(figlet -f standard \"OMNES VIDENT\")"
+    ]
+  }
+}
