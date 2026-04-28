@@ -65,20 +65,26 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Public versioned REST API for external consumers (mounted at /api/v1)
+from api_storage.public_api import router as public_v1_router  # noqa: E402
+app.include_router(public_v1_router)
+
 # ---------------------------------------------------------------------------
 # CORS — allow the Vercel frontend (and localhost dev) to call the API.
 # CORS_ORIGINS env var overrides defaults; separate multiple origins with ","
 # ---------------------------------------------------------------------------
 _raw_origins = os.getenv(
     "CORS_ORIGINS",
-    "https://omnes-vident.vercel.app,http://localhost:5173,http://localhost:3000",
+    "https://omnes-vident.vercel.app,https://frontendportal-nine.vercel.app,"
+    "http://localhost:5173,http://localhost:3000",
 )
 _cors_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_origin_regex=r"https://omnes-vident.*\.vercel\.app",
+    # Cover both the legacy and current Vercel domains, including preview deployments.
+    allow_origin_regex=r"https://(omnes-vident|frontendportal).*\.vercel\.app",
     allow_methods=["*"],
     allow_headers=["*"],
 )

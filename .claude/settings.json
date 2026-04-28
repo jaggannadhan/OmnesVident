@@ -1,7 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "Bash(figlet -f standard \"OMNES VIDENT\")"
+      "Bash(figlet -f standard \"OMNES VIDENT\")",
+      "Bash(npx tsc *)",
+      "Bash(npx vercel *)",
+      "Bash(python3 -c ' *)",
+      "Bash(gcloud run *)",
+      "Bash(make create-super-user *)",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -c \"import json, sys; d = json.load\\(sys.stdin\\); print\\(f\\\\\"total: {d.get\\('total'\\)}\\\\\"\\); print\\(f\\\\\"first title: {d['stories'][0]['title'] if d.get\\('stories'\\) else '\\(none\\)'}\\\\\"\\)\")",
+      "Bash(gcloud logging *)",
+      "Bash(gcloud projects *)",
+      "Bash(gcloud config *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f\\\\\"count: {d['count']}\\\\\"\\); print\\(f\\\\\"first 3: {[r['code'] for r in d['regions'][:3]]}\\\\\"\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('community-tier key created:', d.get\\('api_key_prefix','...'\\) if 'api_key' in d else d\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

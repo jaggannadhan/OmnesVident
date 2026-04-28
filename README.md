@@ -186,16 +186,53 @@ The frontend fetches `/stories?region=US-CA&category=POLITICS&start_date=...&end
 
 ## API Surface
 
-All endpoints are documented live via OpenAPI at `/docs` on your running API.
+Two API surfaces ship in the same FastAPI app:
+
+### Internal (used by the OmnesVident frontend)
+
+OpenAPI auto-docs live at `/docs` on the running API.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET`  | `/stories` | Paginated master stories, filterable by `region`, `category`, `start_date`, `end_date` |
-| `GET`  | `/stories/by-region/{region}` | Region-scoped feed |
-| `GET`  | `/regions` | Available region codes and human labels |
-| `POST` | `/tasks/ingest` | Trigger ingestion fan-out (requires `X-Ingest-Token`) |
+| `GET`  | `/news` | Paginated master stories, filterable by `region`, `category`, `start_date`, `end_date` |
+| `GET`  | `/news/coverage` | Oldest/newest timestamps + total count |
+| `POST` | `/tasks/ingest` | Trigger ingestion fan-out (`X-Ingest-Token`) |
 | `POST` | `/tasks/refine-all` | Re-run AI refinement on all `master_news` docs |
-| `GET`  | `/health` | Liveness probe |
+
+### Public REST API — `/v1/...`
+
+**Versioned, authenticated, rate-limited** — for external developers, partners, and research consumers. Live docs page: [`/api-docs`](https://frontendportal-nine.vercel.app/api-docs).
+
+Every request requires an `x-api-key` header. Sign up via the docs page to mint a community-tier key (5 requests/minute). Super-users get unlimited access.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/v1/auth/signup` | Create a community account; returns API key (one time only) |
+| `GET`  | `/v1/me` | Verify a key; echo identity |
+| `GET`  | `/v1/stories` | Filterable story query: `region`, `category`, `country`, `start_date`, `end_date`, `is_breaking`, `min_heat_score` |
+| `GET`  | `/v1/stories/{id}` | Single story by Firestore doc ID |
+| `GET`  | `/v1/breaking` | Last 24h of breaking-news, sorted by `heat_score` desc |
+| `GET`  | `/v1/regions` | Supported region catalog |
+| `GET`  | `/v1/categories` | Category codes + display labels |
+
+**Quickstart**:
+
+```bash
+# 1. Mint a key (community tier — 5 req/min)
+curl -X POST https://omnesvident-api-naqkmfs2qa-uc.a.run.app/v1/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Ada Lovelace","email":"ada@example.com"}'
+
+# 2. Use it
+curl -H "x-api-key: $OV_KEY" \
+  "https://omnesvident-api-naqkmfs2qa-uc.a.run.app/v1/stories?region=IN-TN&category=POLITICS"
+```
+
+**Provisioning a super-user** (zero rate limit) requires Firestore admin credentials:
+
+```bash
+make create-super-user NAME="Your Name" EMAIL="you@example.com"
+```
 
 ---
 
@@ -331,7 +368,10 @@ OmnesVident/
 │   └── geo_data_cache.json    #   ISO 3166-2 centroid lookup
 │
 ├── api_storage/               # Layer 3 — FastAPI + repositories
-│   ├── routes.py              #   /stories, /regions, /tasks/*
+│   ├── routes.py              #   /news, /tasks/*  (internal endpoints)
+│   ├── public_api.py          #   /v1/*           (versioned public REST API)
+│   ├── api_users.py           #   user accounts, key gen + Firestore-backed cache
+│   ├── rate_limiter.py        #   per-key token-bucket rate limiter
 │   ├── schemas.py             #   Pydantic wire models
 │   └── repository.py          #   Firestore <-> SQLite façade
 │
@@ -345,6 +385,8 @@ OmnesVident/
 │   └── src/
 │       ├── components/
 │       │   ├── visualizer/    #   GlobeScene, Marker, HudOverlay, NewsBlips
+│       │   ├── ApiDocsPage.tsx        # /api-docs route — public REST docs
+│       │   ├── SignupModal.tsx        # community-key issuance modal
 │       │   ├── BreakingNewsCarousel.tsx
 │       │   ├── GlobeControls.tsx
 │       │   ├── NewsCard.tsx

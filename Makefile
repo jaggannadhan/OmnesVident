@@ -1,7 +1,7 @@
 .PHONY: help setup setup-py setup-frontend \
         api ingest frontend run-be run-fe \
         test test-ingestion test-intelligence test-api \
-        deploy-be deploy-fe refine-all \
+        deploy-be deploy-fe refine-all create-super-user \
         all stop
 
 CLOUD_RUN_URL  ?= https://omnesvident-api-naqkmfs2qa-uc.a.run.app
@@ -116,6 +116,17 @@ refine-all:
 		-H "X-Ingest-Token: $(INGEST_SECRET)" \
 		-H "Content-Type: application/json" | python3 -m json.tool
 	@echo "✓ Refinement queued (runs in background on Cloud Run)."
+
+# Provision a super-user in the public-API api_users collection.
+#   make create-super-user NAME="Jagan" EMAIL="jegsirox@gmail.com"
+# Add ROTATE=1 to force a brand-new key for an existing email.
+create-super-user:
+	@if [ -z "$(NAME)" ] || [ -z "$(EMAIL)" ]; then \
+		echo "Usage: make create-super-user NAME=\"Full Name\" EMAIL=\"you@example.com\" [ROTATE=1]"; \
+		exit 1; \
+	fi
+	@FIRESTORE_PROJECT=omnesvident $(PYTHON) -m intelligence_layer.scripts.create_super_user \
+		--name "$(NAME)" --email "$(EMAIL)" $(if $(ROTATE),--rotate,)
 
 # ─────────────────────────────────────────────
 # Test
