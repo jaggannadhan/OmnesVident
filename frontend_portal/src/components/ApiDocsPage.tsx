@@ -477,18 +477,6 @@ export function ApiDocsPage() {
             >
               Get an API key
             </button>
-            <a
-              href={`${API_BASE_PUBLIC}/docs`}
-              target="_blank" rel="noopener noreferrer"
-              style={{
-                padding: "10px 14px", fontSize: "12px", fontWeight: 700,
-                letterSpacing: "0.06em", textTransform: "uppercase",
-                color: "#94a3b8", border: "1px solid rgba(148,163,184,0.25)",
-                borderRadius: "8px", textDecoration: "none",
-              }}
-            >
-              OpenAPI / Swagger ↗
-            </a>
           </div>
 
           <p style={{ marginTop: "16px", fontSize: "11px", color: "#64748b", lineHeight: 1.55 }}>
@@ -502,7 +490,7 @@ export function ApiDocsPage() {
           Authentication
         </h2>
         <p style={{ margin: "0 0 14px", fontSize: "12.5px", color: "#94a3b8", lineHeight: 1.6 }}>
-          Every request must include an <code style={{ color: "#a78bfa", fontFamily: "monospace" }}>x-api-key</code> header.
+          Every request must include an <code style={{ color: "#a78bfa", fontFamily: "monospace" }}>x-api-key</code> header. <br/>
           Requests without a valid key receive HTTP 401. Requests over your rate limit receive HTTP 429 with a <code style={{ color: "#a78bfa", fontFamily: "monospace" }}>Retry-After</code> seconds header.
         </p>
         <CodeBlock>{`curl -H "x-api-key: ov_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \\
