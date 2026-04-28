@@ -1,51 +1,5 @@
 import { CATEGORY_META } from "./NewsCard";
-
-// ---------------------------------------------------------------------------
-// Region data — organized for the selector
-// ---------------------------------------------------------------------------
-
-const REGION_GROUPS = [
-  {
-    label: "Americas",
-    regions: [
-      { code: "US", name: "United States" },
-      { code: "CA", name: "Canada" },
-      { code: "BR", name: "Brazil" },
-      { code: "MX", name: "Mexico" },
-      { code: "AR", name: "Argentina" },
-    ],
-  },
-  {
-    label: "Europe",
-    regions: [
-      { code: "GB", name: "United Kingdom" },
-      { code: "DE", name: "Germany" },
-      { code: "FR", name: "France" },
-      { code: "IT", name: "Italy" },
-      { code: "UA", name: "Ukraine" },
-    ],
-  },
-  {
-    label: "Asia-Pacific",
-    regions: [
-      { code: "JP", name: "Japan" },
-      { code: "CN", name: "China" },
-      { code: "IN", name: "India" },
-      { code: "AU", name: "Australia" },
-      { code: "KR", name: "South Korea" },
-    ],
-  },
-  {
-    label: "Middle East & Africa",
-    regions: [
-      { code: "IL", name: "Israel" },
-      { code: "SA", name: "Saudi Arabia" },
-      { code: "EG", name: "Egypt" },
-      { code: "ZA", name: "South Africa" },
-      { code: "NG", name: "Nigeria" },
-    ],
-  },
-];
+import { RegionCombobox } from "./RegionCombobox";
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -143,52 +97,12 @@ export function Sidebar({
         </div>
       </SidebarSection>
 
-      {/* Regions */}
+      {/* Regions — searchable combobox grouped by continent */}
       <SidebarSection title="Region">
-        <div className="flex flex-col gap-3">
-
-          {/* All regions button */}
-          <button
-            onClick={() => onRegionSelect(undefined)}
-            className={`flex items-center gap-2 w-full text-left rounded-lg px-2.5 py-1.5 text-xs transition-all duration-150 ${
-              !selectedRegion
-                ? "bg-cyan-400/10 text-cyan-400 ring-1 ring-cyan-400/30"
-                : "text-slate-400 hover:text-slate-200 hover:bg-panel"
-            }`}
-            aria-pressed={!selectedRegion}
-          >
-            <span aria-hidden="true">🌐</span>
-            <span className="font-medium">Global</span>
-          </button>
-
-          {REGION_GROUPS.map((group) => (
-            <div key={group.label} className="flex flex-col gap-0.5">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-700 px-2.5 py-0.5">
-                {group.label}
-              </p>
-              {group.regions.map(({ code, name }) => {
-                const isActive = selectedRegion === code;
-                return (
-                  <button
-                    key={code}
-                    onClick={() => onRegionSelect(isActive ? undefined : code)}
-                    className={`flex items-center gap-2.5 w-full text-left rounded-lg px-2.5 py-1.5 text-xs transition-all duration-150 ${
-                      isActive
-                        ? "bg-slate-700/50 text-white ring-1 ring-slate-500/50"
-                        : "text-slate-400 hover:text-slate-200 hover:bg-panel"
-                    }`}
-                    aria-pressed={isActive}
-                  >
-                    <span className="font-mono text-[10px] text-slate-500 w-6 shrink-0">
-                      {code}
-                    </span>
-                    <span className="truncate">{name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+        <RegionCombobox
+          selectedRegion={selectedRegion}
+          onSelect={onRegionSelect}
+        />
       </SidebarSection>
 
       {/* Fair use footer */}
