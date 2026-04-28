@@ -70,6 +70,28 @@ function GlobeWithCarousel({ regionCode, category, dateRange }: GlobeWithCarouse
 }
 
 // ---------------------------------------------------------------------------
+// MobileBreakingNews — compact carousel shown above the mobile feed.
+// React Query dedupes the underlying useNews call against GlobeWithCarousel.
+// ---------------------------------------------------------------------------
+
+function MobileBreakingNews({ regionCode, category, dateRange }: GlobeWithCarouselProps) {
+  const { data } = useNews({
+    region: regionCode,
+    category,
+    limit: 1000,
+    start_date: dateRange.start,
+    end_date: dateRange.end,
+  });
+  const breakingStories = (data?.stories ?? []).filter((s) => s.is_breaking);
+  if (breakingStories.length === 0) return null;
+  return (
+    <div style={{ height: "260px" }}>
+      <BreakingNewsCarousel stories={breakingStories} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Mobile menu icon
 // ---------------------------------------------------------------------------
 
@@ -257,8 +279,13 @@ function FeedView() {
               </div>
             )}
 
-            {/* Fallback tile map (mobile only) */}
-            <div className="md:hidden">
+            {/* Mobile-only: breaking news first, then tile-map navigator */}
+            <div className="md:hidden flex flex-col gap-4">
+              <MobileBreakingNews
+                regionCode={regionCode}
+                category={category}
+                dateRange={dateRange}
+              />
               <WorldMap
                 selectedRegion={regionCode}
                 onRegionSelect={handleRegionSelect}

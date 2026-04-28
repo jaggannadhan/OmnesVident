@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SignupModal } from "./SignupModal";
 
@@ -61,54 +61,175 @@ function CodeBlock({ children, lang = "bash" }: { children: string; lang?: strin
   );
 }
 
-// ─── Endpoint card ────────────────────────────────────────────────────────────
+// ─── Endpoint data model ─────────────────────────────────────────────────────
 
-function Endpoint(props: {
-  method: string;
-  path: string;
-  summary: string;
-  example: string;
+interface EndpointSpec {
+  title:        string;            // friendly name shown on the tile
+  blurb:        string;            // one-liner shown on the tile
+  method:       "GET" | "POST";
+  path:         string;            // technical path, only shown in modal
+  summary:      string;            // longer description shown in modal
+  example:      string;            // curl snippet shown in modal
   responseHint?: string;
-}) {
-  const methodColor =
-    props.method === "GET"  ? "#4ade80" :
-    props.method === "POST" ? "#facc15" :
-                              "#a78bfa";
+  icon:         string;            // single emoji-free glyph for the tile
+}
+
+const methodColorFor = (m: string) =>
+  m === "GET"  ? "#4ade80" :
+  m === "POST" ? "#facc15" :
+                 "#a78bfa";
+
+// ─── Endpoint tile (compact card on the grid) ────────────────────────────────
+
+function EndpointTile({ spec, onClick }: { spec: EndpointSpec; onClick: () => void }) {
+  const color = methodColorFor(spec.method);
   return (
-    <section
+    <button
+      onClick={onClick}
       style={{
+        textAlign: "left",
         background: "rgba(8,10,24,0.6)",
         border: "1px solid rgba(148,163,184,0.14)",
-        borderRadius: "10px",
-        padding: "16px 18px",
-        display: "flex", flexDirection: "column", gap: "10px",
+        borderRadius: "12px",
+        padding: "16px 16px 14px",
+        display: "flex", flexDirection: "column", gap: "8px",
+        cursor: "pointer",
+        color: "inherit",
+        fontFamily: "inherit",
+        position: "relative",
+        transition: "transform 0.12s ease, border-color 0.12s ease, background 0.12s ease",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = `${color}55`;
+        e.currentTarget.style.background  = "rgba(8,10,24,0.85)";
+        e.currentTarget.style.transform   = "translateY(-1px)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = "rgba(148,163,184,0.14)";
+        e.currentTarget.style.background  = "rgba(8,10,24,0.6)";
+        e.currentTarget.style.transform   = "translateY(0)";
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-        <span
-          style={{
-            fontSize: "10px", fontWeight: 800, fontFamily: "monospace",
-            letterSpacing: "0.08em", color: methodColor,
-            background: `${methodColor}18`,
-            padding: "3px 7px", borderRadius: "4px",
-          }}
-        >
-          {props.method}
-        </span>
-        <code style={{ fontSize: "13px", color: "#f1f5f9", fontFamily: "JetBrains Mono, Menlo, monospace" }}>
-          {props.path}
-        </code>
-      </div>
-      <p style={{ margin: 0, fontSize: "12px", color: "#94a3b8", lineHeight: 1.5 }}>
-        {props.summary}
+      {/* method dot in corner */}
+      <span
+        title={spec.method}
+        style={{
+          position: "absolute", top: "12px", right: "12px",
+          width: "7px", height: "7px", borderRadius: "50%",
+          background: color, boxShadow: `0 0 6px ${color}`,
+        }}
+      />
+
+      <span style={{ fontSize: "22px", lineHeight: 1, color, fontWeight: 700, fontFamily: "JetBrains Mono, Menlo, monospace" }}>
+        {spec.icon}
+      </span>
+
+      <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#f1f5f9", letterSpacing: "-0.005em" }}>
+        {spec.title}
+      </h3>
+
+      <p style={{ margin: 0, fontSize: "11px", color: "#94a3b8", lineHeight: 1.45 }}>
+        {spec.blurb}
       </p>
-      <CodeBlock>{props.example}</CodeBlock>
-      {props.responseHint && (
-        <p style={{ margin: "4px 0 0", fontSize: "10px", color: "#64748b", fontStyle: "italic" }}>
-          {props.responseHint}
+
+      <span style={{ marginTop: "auto", paddingTop: "6px", fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#64748b" }}>
+        View details →
+      </span>
+    </button>
+  );
+}
+
+// ─── Endpoint modal (full details) ───────────────────────────────────────────
+
+function EndpointModal({ spec, onClose }: { spec: EndpointSpec; onClose: () => void }) {
+  const color = methodColorFor(spec.method);
+
+  // Close on Escape
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 998,
+        background: "rgba(2,4,16,0.78)", backdropFilter: "blur(6px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "20px",
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="endpoint-modal-title"
+        style={{
+          width: "100%", maxWidth: "640px", maxHeight: "85vh",
+          overflow: "auto",
+          background: "rgba(8,10,24,0.98)",
+          border: `1px solid ${color}33`,
+          borderRadius: "14px",
+          padding: "22px 24px 20px",
+          fontFamily: "Inter, system-ui, sans-serif",
+          color: "#e2e8f0",
+          boxShadow: `0 20px 60px rgba(0,0,0,0.7), 0 0 28px ${color}22`,
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px", marginBottom: "12px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}>
+            <h2 id="endpoint-modal-title" style={{ margin: 0, fontSize: "18px", fontWeight: 700 }}>
+              {spec.title}
+            </h2>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span
+                style={{
+                  fontSize: "10px", fontWeight: 800, fontFamily: "monospace",
+                  letterSpacing: "0.08em", color, background: `${color}18`,
+                  padding: "3px 7px", borderRadius: "4px",
+                }}
+              >
+                {spec.method}
+              </span>
+              <code style={{ fontSize: "12.5px", color: "#cbd5e1", fontFamily: "JetBrains Mono, Menlo, monospace", wordBreak: "break-all" }}>
+                {spec.path}
+              </code>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: "none", border: "none", color: "#64748b",
+              fontSize: "22px", cursor: "pointer", padding: "0 4px", lineHeight: 1,
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Description */}
+        <p style={{ margin: "0 0 14px", fontSize: "12.5px", color: "#94a3b8", lineHeight: 1.6 }}>
+          {spec.summary}
         </p>
-      )}
-    </section>
+
+        {/* Example */}
+        <p style={{ margin: "12px 0 6px", fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>
+          Example
+        </p>
+        <CodeBlock>{spec.example}</CodeBlock>
+
+        {/* Response hint */}
+        {spec.responseHint && (
+          <p style={{ margin: "12px 0 0", fontSize: "11px", color: "#64748b", fontStyle: "italic" }}>
+            {spec.responseHint}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -222,9 +343,88 @@ function KeyReveal({ issued, onClose }: { issued: IssuedKey; onClose: () => void
 
 // ─── ApiDocsPage ─────────────────────────────────────────────────────────────
 
+// ─── Endpoint catalog ────────────────────────────────────────────────────────
+
+const ENDPOINTS: EndpointSpec[] = [
+  {
+    title:   "All Stories",
+    blurb:   "Search the global feed by region, category, date range, breaking flag, or heat score.",
+    method:  "GET",
+    path:    "/v1/stories",
+    summary: "Paginated story search. Filter by region, category, country, date range, breaking-only, or minimum heat score. Default window is the last 7 days when no dates are supplied.",
+    example: `# Tamil Nadu politics — last 7 days
+curl -H "x-api-key: $OV_KEY" \\
+  "${API_BASE_PUBLIC}/v1/stories?region=IN-TN&category=POLITICS&limit=50"`,
+    responseHint: "Returns { total, offset, limit, stories: StoryOut[] }",
+    icon: "{ }",
+  },
+  {
+    title:   "Breaking News",
+    blurb:   "Last 24h of breaking-news stories, sorted by heat score.",
+    method:  "GET",
+    path:    "/v1/breaking",
+    summary: "Returns stories the AI flagged as breaking in the last 24 hours, sorted by heat_score (highest first). Region and category filters are supported.",
+    example: `curl -H "x-api-key: $OV_KEY" \\
+  "${API_BASE_PUBLIC}/v1/breaking?category=HEALTH&limit=10"`,
+    icon: "!",
+  },
+  {
+    title:   "Single Story",
+    blurb:   "Look up one story by its document ID.",
+    method:  "GET",
+    path:    "/v1/stories/{id}",
+    summary: "Fetch a single story by its Firestore document ID. The id is the dedup_group_id field on a StoryOut object.",
+    example: `curl -H "x-api-key: $OV_KEY" \\
+  "${API_BASE_PUBLIC}/v1/stories/0123abcd4567ef89"`,
+    icon: "#",
+  },
+  {
+    title:   "Regions",
+    blurb:   "All supported regions (countries + subdivisions like IN-TN).",
+    method:  "GET",
+    path:    "/v1/regions",
+    summary: "Returns the catalog of supported region codes — countries and subdivisions like IN-TN, US-CA, GB-ENG. Use these codes as the region filter on /v1/stories.",
+    example: `curl -H "x-api-key: $OV_KEY" \\
+  "${API_BASE_PUBLIC}/v1/regions"`,
+    icon: "@",
+  },
+  {
+    title:   "Categories",
+    blurb:   "The seven story categories with display labels.",
+    method:  "GET",
+    path:    "/v1/categories",
+    summary: "Returns the seven story category codes (WORLD, POLITICS, SCIENCE_TECH, BUSINESS, HEALTH, ENTERTAINMENT, SPORTS) with display labels.",
+    example: `curl -H "x-api-key: $OV_KEY" \\
+  "${API_BASE_PUBLIC}/v1/categories"`,
+    icon: "★",
+  },
+  {
+    title:   "Sign Up",
+    blurb:   "Mint a community API key. Returned exactly once.",
+    method:  "POST",
+    path:    "/v1/auth/signup",
+    summary: "Create a community-tier account and receive an API key. The raw key is returned exactly once — store it immediately. Lost keys can only be replaced by signing up with a new email.",
+    example: `curl -X POST "${API_BASE_PUBLIC}/v1/auth/signup" \\
+  -H "Content-Type: application/json" \\
+  -d '{"name":"Ada Lovelace","email":"ada@example.com"}'`,
+    icon: "+",
+  },
+  {
+    title:   "Verify Key",
+    blurb:   "Echo identity for the supplied key. Useful for setup checks.",
+    method:  "GET",
+    path:    "/v1/me",
+    summary: "Validates the x-api-key header and returns the calling user's identity (name, email, access level, rate limit). Use this for client setup smoke tests.",
+    example: `curl -H "x-api-key: $OV_KEY" \\
+  "${API_BASE_PUBLIC}/v1/me"`,
+    icon: "?",
+  },
+];
+
 export function ApiDocsPage() {
   const [signupOpen, setSignupOpen] = useState(false);
   const [issued,     setIssued]     = useState<IssuedKey | null>(null);
+  const [activeIdx,  setActiveIdx]  = useState<number | null>(null);
 
   const onSignupSuccess = (apiKey: string, email: string, name: string) => {
     setSignupOpen(false);
@@ -312,67 +512,19 @@ export function ApiDocsPage() {
         <h2 style={{ fontSize: "11px", letterSpacing: "0.16em", textTransform: "uppercase", color: "#475569", margin: "32px 0 14px" }}>
           Endpoints
         </h2>
-        <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-
-          <Endpoint
-            method="GET"
-            path="/v1/stories"
-            summary="Paginated story search. Filter by region, category, country, date range, breaking-only, or minimum heat score."
-            example={`# Tamil Nadu politics over the last 7 days
-curl -H "x-api-key: $OV_KEY" \\
-  "${API_BASE_PUBLIC}/v1/stories?region=IN-TN&category=POLITICS&limit=50"`}
-            responseHint="Returns { total, offset, limit, stories: StoryOut[] }"
-          />
-
-          <Endpoint
-            method="GET"
-            path="/v1/breaking"
-            summary="Last 24 hours of breaking-news stories, sorted by heat_score descending. Region/category filters supported."
-            example={`curl -H "x-api-key: $OV_KEY" \\
-  "${API_BASE_PUBLIC}/v1/breaking?category=HEALTH&limit=10"`}
-          />
-
-          <Endpoint
-            method="GET"
-            path="/v1/stories/{id}"
-            summary="Fetch a single story by its Firestore document ID."
-            example={`curl -H "x-api-key: $OV_KEY" \\
-  "${API_BASE_PUBLIC}/v1/stories/0123abcd4567ef89"`}
-          />
-
-          <Endpoint
-            method="GET"
-            path="/v1/regions"
-            summary="List of supported region codes (countries + subdivisions like IN-TN, US-CA)."
-            example={`curl -H "x-api-key: $OV_KEY" \\
-  "${API_BASE_PUBLIC}/v1/regions"`}
-          />
-
-          <Endpoint
-            method="GET"
-            path="/v1/categories"
-            summary="The seven story categories with display labels."
-            example={`curl -H "x-api-key: $OV_KEY" \\
-  "${API_BASE_PUBLIC}/v1/categories"`}
-          />
-
-          <Endpoint
-            method="POST"
-            path="/v1/auth/signup"
-            summary="Create a community account and receive an API key. Returns the key only once — store it immediately."
-            example={`curl -X POST "${API_BASE_PUBLIC}/v1/auth/signup" \\
-  -H "Content-Type: application/json" \\
-  -d '{"name":"Ada Lovelace","email":"ada@example.com"}'`}
-          />
-
-          <Endpoint
-            method="GET"
-            path="/v1/me"
-            summary="Verify a key and return identity. Useful for client setup."
-            example={`curl -H "x-api-key: $OV_KEY" \\
-  "${API_BASE_PUBLIC}/v1/me"`}
-          />
-
+        <p style={{ margin: "-8px 0 14px", fontSize: "11px", color: "#64748b", lineHeight: 1.5 }}>
+          Click any tile for the full path, parameters, and a copy-paste curl example.
+        </p>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+            gap: "12px",
+          }}
+        >
+          {ENDPOINTS.map((ep, i) => (
+            <EndpointTile key={ep.path + ep.method} spec={ep} onClick={() => setActiveIdx(i)} />
+          ))}
         </div>
 
         {/* Story shape */}
@@ -409,6 +561,9 @@ curl -H "x-api-key: $OV_KEY" \\
         onSuccess={onSignupSuccess}
       />
       {issued && <KeyReveal issued={issued} onClose={() => setIssued(null)} />}
+      {activeIdx !== null && (
+        <EndpointModal spec={ENDPOINTS[activeIdx]} onClose={() => setActiveIdx(null)} />
+      )}
     </div>
   );
 }
