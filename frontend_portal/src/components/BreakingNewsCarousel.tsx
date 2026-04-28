@@ -61,8 +61,14 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [dragOffset, setDragOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Drag state — refs (not state) so handlers don't restart per render
   const dragStartXRef = useRef<number | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dragStartYRef = useRef<number | null>(null);
+  // "unknown" until we've moved enough to classify; "horizontal" commits;
+  // "vertical" releases the gesture so the page can scroll naturally.
+  const intentRef     = useRef<"unknown" | "horizontal" | "vertical">("unknown");
+  const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const advance = useCallback(() => {
     setActiveIdx((i) => (i + 1) % sorted.length);
@@ -86,37 +92,86 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
   // Reset index when the stories list changes
   useEffect(() => { setActiveIdx(0); }, [sorted.length]);
 
-  // ─── Swipe handlers (pointer events unify touch + mouse + pen) ──────────────
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+  // ─── Swipe core ─────────────────────────────────────────────────────────────
+  // Distance moved before we decide whether the gesture is horizontal vs vertical
+  const INTENT_THRESHOLD = 8;
+
+  const beginDrag = (x: number, y: number, target: EventTarget | null): boolean => {
     // Don't hijack clicks on interactive children (link, dot buttons, arrows)
-    if ((e.target as HTMLElement).closest("a, button")) return;
-    dragStartXRef.current = e.clientX;
-    setIsDragging(true);
+    if ((target as HTMLElement | null)?.closest("a, button")) return false;
+    dragStartXRef.current = x;
+    dragStartYRef.current = y;
+    intentRef.current     = "unknown";
     if (timerRef.current) clearInterval(timerRef.current);
-    e.currentTarget.setPointerCapture(e.pointerId);
+    return true;
   };
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragStartXRef.current === null) return;
-    setDragOffset(e.clientX - dragStartXRef.current);
+  const moveDrag = (x: number, y: number) => {
+    const sx = dragStartXRef.current, sy = dragStartYRef.current;
+    if (sx === null || sy === null) return;
+    const dx = x - sx;
+    const dy = y - sy;
+
+    if (intentRef.current === "unknown") {
+      if (Math.abs(dx) < INTENT_THRESHOLD && Math.abs(dy) < INTENT_THRESHOLD) return;
+      intentRef.current = Math.abs(dx) > Math.abs(dy) ? "horizontal" : "vertical";
+      if (intentRef.current === "horizontal") setIsDragging(true);
+      else {
+        // Vertical scroll — release so the page can scroll
+        dragStartXRef.current = null;
+        dragStartYRef.current = null;
+        return;
+      }
+    }
+    if (intentRef.current === "horizontal") setDragOffset(dx);
   };
 
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragStartXRef.current === null) return;
-    const delta = e.clientX - dragStartXRef.current;
+  const endDrag = (x: number) => {
+    const sx = dragStartXRef.current;
+    const wasHorizontal = intentRef.current === "horizontal";
     dragStartXRef.current = null;
+    dragStartYRef.current = null;
+    intentRef.current     = "unknown";
     setIsDragging(false);
     setDragOffset(0);
+    if (sx === null) { resetTimer(); return; }
 
-    if (sorted.length > 1 && Math.abs(delta) > SWIPE_THRESHOLD_PX) {
+    const delta = x - sx;
+    if (wasHorizontal && sorted.length > 1 && Math.abs(delta) > SWIPE_THRESHOLD_PX) {
       if (delta < 0) advance();
       else          rewind();
     }
     resetTimer();
+  };
 
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
+  // ─── Touch handlers (mobile) ────────────────────────────────────────────────
+  const onTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const t = e.touches[0];
+    beginDrag(t.clientX, t.clientY, e.target);
+  };
+  const onTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const t = e.touches[0];
+    if (!t) return;
+    moveDrag(t.clientX, t.clientY);
+  };
+  const onTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    const t = e.changedTouches[0];
+    endDrag(t ? t.clientX : (dragStartXRef.current ?? 0));
+  };
+
+  // ─── Mouse handlers (desktop) ───────────────────────────────────────────────
+  // We attach move/up to the document so the drag survives the cursor leaving
+  // the carousel — required for a smooth desktop swipe-and-drag.
+  const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!beginDrag(e.clientX, e.clientY, e.target)) return;
+    const onMove = (ev: MouseEvent) => moveDrag(ev.clientX, ev.clientY);
+    const onUp   = (ev: MouseEvent) => {
+      endDrag(ev.clientX);
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup",   onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup",   onUp);
   };
 
   if (sorted.length === 0) return null;
@@ -189,10 +244,11 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
 
       {/* Active story card — swipeable */}
       <div
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+        onMouseDown={onMouseDown}
         style={{
           flex: 1,
           padding: "12px 14px",
@@ -200,6 +256,7 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
           flexDirection: "column",
           gap: "8px",
           minHeight: 0,
+          // Allow vertical scroll, capture horizontal swipes
           touchAction: "pan-y",
           cursor: sorted.length > 1 ? (isDragging ? "grabbing" : "grab") : "default",
           userSelect: isDragging ? "none" : "auto",
