@@ -145,7 +145,7 @@ function SyncCountdown() {
     <div className="flex items-center gap-2 px-2.5 py-1 rounded-md border border-cyan-500/20 bg-cyan-400/5 backdrop-blur-sm pointer-events-none">
       <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0" />
       <span className="text-[9px] font-mono text-cyan-500/80 uppercase tracking-widest">
-        sync in{" "}
+        News in{" "}
         <span className="text-cyan-300 font-semibold tabular-nums">{m}:{s}</span>
       </span>
     </div>
