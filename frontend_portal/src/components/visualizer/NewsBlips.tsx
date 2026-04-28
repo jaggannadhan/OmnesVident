@@ -1,6 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { Html } from "@react-three/drei";
-import type { Vector3 } from "three";
+import { useFrame } from "@react-three/fiber";
+import { Vector3 } from "three";
+import type { Group } from "three";
 import type { StoryOut } from "../../services/api";
 import { latLngToVector3, regionToVector3 } from "./utils/geoUtils";
 import { Marker, CATEGORY_COLORS } from "./Marker";
@@ -58,6 +60,72 @@ function dominantCategory(group: StoryOut[]): string {
   for (const s of group) counts[s.category] = (counts[s.category] ?? 0) + 1;
   return Object.entries(counts)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
+}
+
+/**
+ * Cluster count badge that hides itself when the underlying marker is on the
+ * back hemisphere of the globe.
+ *
+ * drei's <Html> renders DOM, which has no depth-testing against 3D geometry,
+ * so without this manual check the badges would bleed through the globe and
+ * remain clickable on its far side. We compute the world position of the
+ * badge each frame and compare against the camera direction:
+ *
+ *   for a sphere of radius R centred at origin, a point P at radius r is on
+ *   the visible hemisphere when  dot(P, C) > R * |P|.
+ *
+ * (Independent of camera distance — only direction matters.)
+ */
+const VISIBILITY_THRESHOLD = GLOBE_RADIUS * (GLOBE_RADIUS + 0.04);
+
+interface ClusterBadgeProps {
+  position: Vector3;
+  color:    string;
+  count:    number;
+}
+
+function ClusterBadge({ position, color, count }: ClusterBadgeProps) {
+  const groupRef  = useRef<Group>(null);
+  const innerRef  = useRef<HTMLDivElement>(null);
+  const worldPos  = useRef(new Vector3()).current;
+  const visibleRef = useRef(true);
+
+  useFrame(({ camera }) => {
+    if (!groupRef.current || !innerRef.current) return;
+    groupRef.current.getWorldPosition(worldPos);
+    const visible = worldPos.dot(camera.position) > VISIBILITY_THRESHOLD;
+    if (visible !== visibleRef.current) {
+      visibleRef.current = visible;
+      innerRef.current.style.display = visible ? "block" : "none";
+    }
+  });
+
+  return (
+    <group ref={groupRef} position={position}>
+      <Html center distanceFactor={1.4} zIndexRange={[10, 0]}>
+        <div
+          ref={innerRef}
+          style={{
+            transform: "translate(14px, -14px)",
+            padding: "1px 5px",
+            fontFamily: "JetBrains Mono, Menlo, monospace",
+            fontSize: "9px",
+            fontWeight: 700,
+            color,
+            background: "rgba(8,10,24,0.85)",
+            border: `1px solid ${color}55`,
+            borderRadius: "8px",
+            whiteSpace: "nowrap",
+            boxShadow: `0 0 6px ${color}55`,
+            userSelect: "none",
+            pointerEvents: "none",
+          }}
+        >
+          +{count}
+        </div>
+      </Html>
+    </group>
+  );
 }
 
 export function NewsBlips({ stories, selectedId, onSelectId, focusState }: NewsBlipsProps) {
@@ -125,7 +193,7 @@ export function NewsBlips({ stories, selectedId, onSelectId, focusState }: NewsB
         );
       })}
 
-      {/* Count badges — only on multi-story clusters that aren't dimmed away */}
+      {/* Count badges — hidden via ClusterBadge when on the back of the globe */}
       {clusters
         .filter(
           (c) =>
@@ -133,33 +201,12 @@ export function NewsBlips({ stories, selectedId, onSelectId, focusState }: NewsB
             !(focusState != null && c.representative.region_code !== focusState)
         )
         .map((c) => (
-          <Html
+          <ClusterBadge
             key={`badge-${c.representative.dedup_group_id}`}
             position={c.position}
-            center
-            distanceFactor={1.4}
-            style={{ pointerEvents: "none" }}
-            zIndexRange={[10, 0]}
-          >
-            <div
-              style={{
-                transform: "translate(14px, -14px)",
-                padding: "1px 5px",
-                fontFamily: "JetBrains Mono, Menlo, monospace",
-                fontSize: "9px",
-                fontWeight: 700,
-                color: c.color,
-                background: "rgba(8,10,24,0.85)",
-                border: `1px solid ${c.color}55`,
-                borderRadius: "8px",
-                whiteSpace: "nowrap",
-                boxShadow: `0 0 6px ${c.color}55`,
-                userSelect: "none",
-              }}
-            >
-              +{c.count}
-            </div>
-          </Html>
+            color={c.color}
+            count={c.count}
+          />
         ))}
 
       {selectedCluster && (
