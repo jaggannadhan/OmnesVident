@@ -1,11 +1,12 @@
 import { useState, useCallback, lazy, Suspense } from "react";
-import { useNavigate, useParams, Routes, Route, Navigate } from "react-router-dom";
+import { useNavigate, useParams, Routes, Route, Navigate, Link } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { NewsGrid } from "./components/NewsGrid";
 import { WorldMap } from "./components/WorldMap";
 import { GlobeErrorBoundary } from "./components/visualizer/GlobeErrorBoundary";
 import { GlobeControls, type DateRange } from "./components/GlobeControls";
 import { BreakingNewsCarousel } from "./components/BreakingNewsCarousel";
+import { ApiDocsPage } from "./components/ApiDocsPage";
 import { useNews } from "./hooks/useNews";
 
 // Lazy-load the heavy R3F bundle so it doesn't block the initial paint
@@ -211,6 +212,15 @@ function FeedView() {
 
           {/* View toggle + time controls + live indicator */}
           <div className="ml-auto flex items-center gap-3">
+            {/* API docs link */}
+            <Link
+              to="/api-docs"
+              className="hidden sm:inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-md border border-violet-500/30 text-violet-300 hover:bg-violet-500/10 hover:border-violet-500/60 transition-colors"
+              title="Public REST API documentation"
+            >
+              {"</> API"}
+            </Link>
+
             {/* Time-range selector */}
             <GlobeControls value={dateRange} onChange={(r) => { setDateRange(r); setOffset(0); }} />
 
@@ -282,6 +292,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<FeedView />} />
       <Route path="/region/:regionCode" element={<FeedView />} />
+      <Route path="/api-docs" element={<ApiDocsPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
