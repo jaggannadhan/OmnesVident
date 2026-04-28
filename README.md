@@ -11,20 +11,23 @@
 
 `[ Python 3.12 ]` `[ FastAPI ]` `[ React 18 + TypeScript ]` `[ Three.js / R3F ]` `[ Firestore ]` `[ OpenAI GPT-4o-mini ]` `[ Cloud Run ]` `[ Vercel ]`
 
+**Live**: [`frontendportal-nine.vercel.app`](https://frontendportal-nine.vercel.app) · **Public API docs**: [`/api-docs`](https://frontendportal-nine.vercel.app/api-docs)
+
 ---
 
 ## Table of Contents
 
 1. [What is OmnesVident?](#what-is-omnesvident)
-2. [System Architecture](#system-architecture)
-3. [The ETL Pipeline](#the-etl-pipeline)
-4. [Tech Stack — In Depth](#tech-stack--in-depth)
-5. [API Surface](#api-surface)
-6. [Use Cases](#use-cases)
-7. [Roadmap & Extensibility](#roadmap--extensibility)
-8. [Getting Started](#getting-started)
-9. [Deployment](#deployment)
-10. [Project Layout](#project-layout)
+2. [What's New](#whats-new)
+3. [System Architecture](#system-architecture)
+4. [The ETL Pipeline](#the-etl-pipeline)
+5. [Tech Stack — In Depth](#tech-stack--in-depth)
+6. [API Surface](#api-surface)
+7. [Use Cases](#use-cases)
+8. [Roadmap & Extensibility](#roadmap--extensibility)
+9. [Getting Started](#getting-started)
+10. [Deployment](#deployment)
+11. [Project Layout](#project-layout)
 
 ---
 
@@ -35,12 +38,29 @@
 Most news apps give you an endless feed. OmnesVident gives you the **planet**.
 
 - **A rotating 3D Earth** is the primary interface. Every story is a neon blip pinned to the exact coordinates where it happened.
+- **Density-aware clustering** — when many stories share a coordinate bucket, they collapse into a single blip painted in the **dominant category's** colour with a `+N` count badge. One glance tells you both *how much* news is breaking in a region and *what type* dominates.
 - **Seven taxonomies** (`World`, `Politics`, `Science & Tech`, `Business`, `Health`, `Entertainment`, `Sports`) let you slice reality by lens.
-- **Breaking-news detection** runs every story through an AI urgency model — truly breaking stories (active conflicts, disasters, decisive elections) pulse red and surface into a dedicated carousel.
+- **Breaking-news detection** runs every story through an AI urgency model — truly breaking stories (active conflicts, disasters, decisive elections) pulse red on the globe and surface into a dedicated **swipe-able carousel** (touch + mouse, with flick-velocity commit and gesture-intent detection).
 - **Region-aware queries** let you zoom from `World → US → California` and see only the stories with ground truth in that polygon.
+- **Mobile-first** — on small screens the breaking carousel surfaces above the feed (the heavy R3F globe is desktop-only) so the most urgent stories are the first thing on screen.
 - **Every story is AI-refined**: translated to English when needed, geo-located to a precise lat/lng, classified, and scored — before it ever hits your screen.
+- **Public REST API** at `/v1/*` — versioned, key-authenticated, rate-limited. External developers, journalists, and researchers can pull the same data the globe consumes.
 
 The result is not a feed. It is a **geospatial situational-awareness console**, built for people who need to understand _where_ the world is happening right now.
+
+---
+
+## What's New
+
+| Area | Change |
+|------|--------|
+| **Globe** | Per-bucket clustering — one blip per coordinate, painted in the dominant category's colour with a `+N` count badge. Replaces the previous additive-blend approach that turned dense regions into white blobs. |
+| **Globe** | Cluster badges hide themselves on the back hemisphere via a per-frame world-position visibility check, so they no longer bleed through the globe or hijack clicks. |
+| **Mobile** | Dedicated breaking-news section above the feed on small screens (the heavy 3D globe is still desktop-only). |
+| **Carousel** | Native touch + mouse listeners with **gesture-intent detection** (released to the browser when vertical), **flick-velocity commit** (fast short flicks count), and a 4-dot indicator + arrow pair flanking the dots. |
+| **Public API** | Versioned `/v1/*` REST surface with `x-api-key` auth, per-key in-process rate limiting (community 5 req/min, super-user unlimited), and a self-serve signup flow at [`/api-docs`](https://frontendportal-nine.vercel.app/api-docs). |
+| **API docs page** | Endpoint **tile grid** (no technical paths on the tiles — friendly names like *All Stories* / *Breaking News* / *Single Story*); each tile opens a modal with the full path, curl example, and method. |
+| **Ops** | New `make create-super-user NAME=… EMAIL=…` target; `make refine-all` re-classifies existing Firestore docs through the breaking-news prompt. |
 
 ---
 
@@ -52,7 +72,8 @@ OmnesVident is a **four-layer distributed system**. Each layer has one job and e
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                            LAYER 4 — Presentation                          │
 │   React 18 + TypeScript + Vite + Three.js / R3F + TailwindCSS              │
-│   ▸ 3D globe w/ neon blips   ▸ breaking-news carousel   ▸ sidebar filters  │
+│   ▸ 3D globe (clustered blips)  ▸ swipe-able breaking carousel             │
+│   ▸ sidebar filters             ▸ /api-docs portal w/ signup modal         │
 │                              ▸ hosted on Vercel                            │
 └────────────────────────────────────────────────────────────────────────────┘
                                       ▲
@@ -61,7 +82,8 @@ OmnesVident is a **four-layer distributed system**. Each layer has one job and e
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                            LAYER 3 — API & Storage                         │
 │   FastAPI + Pydantic + Gunicorn/Uvicorn on Cloud Run                       │
-│   ▸ /stories  ▸ /regions  ▸ /tasks/ingest  ▸ /tasks/refine-all             │
+│   ▸ /news  ▸ /tasks/ingest  ▸ /tasks/refine-all     (internal)             │
+│   ▸ /v1/stories  ▸ /v1/breaking  ▸ /v1/auth/signup  (public, x-api-key)    │
 │   ▸ Firestore (prod)  ▸ SQLite fallback (dev)                              │
 └────────────────────────────────────────────────────────────────────────────┘
                                       ▲
@@ -142,7 +164,11 @@ Then the pipeline applies, in order:
 
 ### 4. `Serve` — REST to the globe
 
-The frontend fetches `/stories?region=US-CA&category=POLITICS&start_date=...&end_date=...&limit=1000`. TanStack Query deduplicates and caches; the globe renders blips keyed by `(lat, lng, category)`.
+The frontend fetches `/news?region=US-CA&category=POLITICS&start_date=...&end_date=...&limit=1000`. TanStack Query deduplicates and caches.
+
+The globe **buckets** stories by their resolved `(lat, lng)` to ~1 km granularity, then renders one blip per bucket coloured by the **dominant category** (red if any story in the bucket is breaking). A `+N` badge appears for buckets with ≥3 stories. Each badge does its own per-frame visibility check against the globe's hemisphere — so badges on the back of the Earth never bleed through, and clicks pass through to the orbit controls instead of the badge.
+
+External consumers hit the **public API** at `/v1/stories` — same Firestore data, key-authenticated, rate-limited.
 
 ---
 
@@ -164,6 +190,9 @@ The frontend fetches `/stories?region=US-CA&category=POLITICS&start_date=...&end
 | AI — fallback | **Vertex AI Gemini** | Used by `AIGeoRefiner` path when set up |
 | Container | **Docker** → **Cloud Run** (managed) | Scale-to-zero, pay-per-request |
 | Scheduler | **Cloud Scheduler** | Cron for `/tasks/ingest` every 15 min |
+| Public API auth | **`x-api-key` header** + SHA-256 hash in Firestore | Keys stored as digests; we can't recover lost keys, only reissue |
+| Rate limiting | **In-process token bucket** (`api_storage/rate_limiter.py`) | Per-key, per-instance — community 5 req/min, super-user unlimited |
+| Email validation | **email-validator** (via Pydantic `EmailStr`) | Catches malformed signups before Firestore write |
 
 ### Frontend
 
@@ -176,6 +205,7 @@ The frontend fetches `/stories?region=US-CA&category=POLITICS&start_date=...&end
 | Routing | **React Router 6** | `/region/:code` deep links |
 | Styling | **TailwindCSS 3** | Design-token-driven; neon category palette |
 | Geo data | **world-atlas**, **us-atlas**, **topojson-client** | TopoJSON polygons for country/state outlines |
+| Gestures | Native `touch*` + `mouse*` listeners w/ flick-velocity commit | iOS-Safari-safe swipe on the breaking carousel; intent detection releases vertical scrolls back to the browser |
 | Hosting | **Vercel** | Edge CDN, automatic preview deploys |
 
 ### Data Sources
@@ -201,9 +231,11 @@ OpenAPI auto-docs live at `/docs` on the running API.
 
 ### Public REST API — `/v1/...`
 
-**Versioned, authenticated, rate-limited** — for external developers, partners, and research consumers. Live docs page: [`/api-docs`](https://frontendportal-nine.vercel.app/api-docs).
+**Versioned, authenticated, rate-limited** — for external developers, partners, and research consumers.
 
-Every request requires an `x-api-key` header. Sign up via the docs page to mint a community-tier key (5 requests/minute). Super-users get unlimited access.
+→ **Interactive docs page**: [`/api-docs`](https://frontendportal-nine.vercel.app/api-docs) — friendly endpoint tiles that open a modal with curl examples; one-click signup + masked key reveal panel.
+
+Every request requires an `x-api-key` header. Sign up via the docs page to mint a community-tier key (5 requests / minute). Super-users get unlimited access.
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -215,15 +247,24 @@ Every request requires an `x-api-key` header. Sign up via the docs page to mint 
 | `GET`  | `/v1/regions` | Supported region catalog |
 | `GET`  | `/v1/categories` | Category codes + display labels |
 
+**Tiers**:
+
+| Tier | Limit | How to get it |
+|------|-------|---------------|
+| Community | **5 req/min** per key (per Cloud Run instance) | Self-serve via the signup modal at `/api-docs` |
+| Super-user | **Unlimited** | Admin-issued via `make create-super-user` |
+
 **Quickstart**:
 
 ```bash
-# 1. Mint a key (community tier — 5 req/min)
+# 1. Mint a key (community tier)
 curl -X POST https://omnesvident-api-naqkmfs2qa-uc.a.run.app/v1/auth/signup \
   -H "Content-Type: application/json" \
   -d '{"name":"Ada Lovelace","email":"ada@example.com"}'
+# → returns { api_key: "ov_…", … }   ← shown ONCE; store it
 
 # 2. Use it
+export OV_KEY=ov_xxxxxxxx…
 curl -H "x-api-key: $OV_KEY" \
   "https://omnesvident-api-naqkmfs2qa-uc.a.run.app/v1/stories?region=IN-TN&category=POLITICS"
 ```
@@ -232,7 +273,10 @@ curl -H "x-api-key: $OV_KEY" \
 
 ```bash
 make create-super-user NAME="Your Name" EMAIL="you@example.com"
+# Add ROTATE=1 to retire and reissue an existing user's key.
 ```
+
+**Key handling**: Firestore stores only the SHA-256 digest (`api_key_hash`) and the first 12 chars of the raw key (`api_key_prefix`) for display. The raw key is shown to the user exactly once at signup; we cannot recover it.
 
 ---
 
@@ -271,7 +315,11 @@ OmnesVident is built to grow. The seams are deliberate.
 | Swap the AI model | `intelligence_layer/refiner.py` — `_OPENAI_MODEL` const |
 | Add a new region | `ingestion_engine/regions_to_track.json` |
 | Change blip colors | `frontend_portal/src/components/visualizer/Marker.tsx` `CATEGORY_COLORS` |
-| Add a new endpoint | `api_storage/routes.py` |
+| Tune the cluster bucket size or `+N` badge threshold | `frontend_portal/src/components/visualizer/NewsBlips.tsx` (`bucketKey`, `BADGE_THRESHOLD`) |
+| Adjust swipe sensitivity | `frontend_portal/src/components/BreakingNewsCarousel.tsx` (`SWIPE_THRESHOLD_PX`, `FLICK_VELOCITY_PXMS`) |
+| Add a new internal endpoint | `api_storage/routes.py` |
+| Add a new public-API endpoint | `api_storage/public_api.py` (auto-protected by `auth_required`) |
+| Change rate-limit defaults | `PUBLIC_API_RATE_PER_MIN` env var, or `api_storage/rate_limiter.py` |
 
 ---
 
@@ -313,9 +361,12 @@ OPEN_AI_API_KEY=sk-proj-...
 
 # Protects /tasks/* endpoints
 INGEST_SECRET=<long-random-string>
+
+# Optional — enables Firestore (otherwise the API uses local SQLite)
+FIRESTORE_PROJECT=your-gcp-project-id
 ```
 
-Missing keys are fine — each provider fails gracefully and the pipeline skips it.
+Missing keys are fine — each provider fails gracefully and the pipeline skips it. The public-API signup endpoint requires `FIRESTORE_PROJECT` to be set, since user records and key hashes live in Firestore; story queries also fall back to SQLite when Firestore is unavailable.
 
 ### 3. Run it
 
@@ -325,6 +376,8 @@ make run-fe           # starts Vite dev server on :5173
 ```
 
 Open **http://localhost:5173** and watch the planet fill with blips.
+
+The public API docs page lives at **http://localhost:5173/api-docs** — sign up there to get a key, then point `curl` at `http://localhost:8000/v1/...`.
 
 ### 4. Tests
 
@@ -342,12 +395,24 @@ make test-api             # FastAPI route contracts
 OmnesVident ships to a hybrid GCP + Vercel stack.
 
 ```bash
-make deploy-be        # gcloud run deploy → Cloud Run (backend + ingestion)
-make deploy-fe        # vercel --prod     → Vercel (frontend)
-make refine-all       # kick off a full AI backfill on Firestore
+make deploy-be                                  # gcloud run deploy → Cloud Run
+make deploy-fe                                  # vercel --prod     → Vercel
+make refine-all                                 # kick off a full AI backfill on Firestore
+make create-super-user NAME="…" EMAIL="…"       # provision an unlimited-tier API user
 ```
 
 Cloud Run auto-scales to zero when idle. Cloud Scheduler handles the 15-minute ingestion cron. Vercel edge-caches the SPA globally.
+
+**Required Cloud Run env vars** (set on first deploy or via `gcloud run services update --update-env-vars`):
+
+| Var | Purpose |
+|-----|---------|
+| `FIRESTORE_PROJECT` | GCP project ID for the Firestore database |
+| `INGEST_SECRET` | Header token for `/tasks/ingest` and `/tasks/refine-all` |
+| `OPEN_AI_API_KEY` | Used by the AI refiner |
+| `*_API_KEY` (provider) | One per news source — providers fail gracefully when absent |
+| `PUBLIC_API_RATE_PER_MIN` *(optional)* | Default community-tier rate limit; default 5 |
+| `CORS_ORIGINS` *(optional)* | Comma-separated origins; defaults cover the Vercel + localhost dev |
 
 ---
 
@@ -365,7 +430,10 @@ OmnesVident/
 │   ├── ai_geo_refiner.py      #   Vertex AI Gemini alternative path
 │   ├── classifier.py          #   rule-based 7-way taxonomy
 │   ├── deduplicator.py        #   fuzzy-match dedup
-│   └── geo_data_cache.json    #   ISO 3166-2 centroid lookup
+│   ├── geo_data_cache.json    #   ISO 3166-2 centroid lookup
+│   └── scripts/
+│       ├── create_super_user.py   # admin CLI for issuing super-user keys
+│       └── export_geo.py          # regenerate geo_data_cache.json
 │
 ├── api_storage/               # Layer 3 — FastAPI + repositories
 │   ├── routes.py              #   /news, /tasks/*  (internal endpoints)
@@ -384,11 +452,12 @@ OmnesVident/
 ├── frontend_portal/           # Layer 4 — React + R3F globe
 │   └── src/
 │       ├── components/
-│       │   ├── visualizer/    #   GlobeScene, Marker, HudOverlay, NewsBlips
-│       │   ├── ApiDocsPage.tsx        # /api-docs route — public REST docs
-│       │   ├── SignupModal.tsx        # community-key issuance modal
-│       │   ├── BreakingNewsCarousel.tsx
-│       │   ├── GlobeControls.tsx
+│       │   ├── visualizer/    #   GlobeScene, Earth, Marker, HudOverlay,
+│       │   │                  #   NewsBlips (clustering + ClusterBadge)
+│       │   ├── ApiDocsPage.tsx          # /api-docs — endpoint tiles + key reveal
+│       │   ├── SignupModal.tsx          # community-key issuance modal
+│       │   ├── BreakingNewsCarousel.tsx # swipe-able, flick-velocity commit
+│       │   ├── GlobeControls.tsx        # date-range presets + range portal
 │       │   ├── NewsCard.tsx
 │       │   └── Sidebar.tsx
 │       ├── hooks/useNews.ts
