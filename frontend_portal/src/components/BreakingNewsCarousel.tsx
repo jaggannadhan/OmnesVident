@@ -5,6 +5,7 @@ import type { StoryOut } from "../services/api";
 
 const ROTATE_INTERVAL_MS = 6000;   // auto-advance every 6 s
 const BREAKING_COLOR     = "#FF2020";
+const SWIPE_THRESHOLD_PX = 60;     // distance required to commit a swipe
 
 // ─── HeatBar — visual urgency indicator ──────────────────────────────────────
 
@@ -58,10 +59,17 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
   });
 
   const [activeIdx, setActiveIdx] = useState(0);
+  const [dragOffset, setDragOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartXRef = useRef<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const advance = useCallback(() => {
     setActiveIdx((i) => (i + 1) % sorted.length);
+  }, [sorted.length]);
+
+  const rewind = useCallback(() => {
+    setActiveIdx((i) => (i - 1 + sorted.length) % sorted.length);
   }, [sorted.length]);
 
   const resetTimer = useCallback(() => {
@@ -77,6 +85,39 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
 
   // Reset index when the stories list changes
   useEffect(() => { setActiveIdx(0); }, [sorted.length]);
+
+  // ─── Swipe handlers (pointer events unify touch + mouse + pen) ──────────────
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Don't hijack clicks on interactive children (link, dot buttons, arrows)
+    if ((e.target as HTMLElement).closest("a, button")) return;
+    dragStartXRef.current = e.clientX;
+    setIsDragging(true);
+    if (timerRef.current) clearInterval(timerRef.current);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragStartXRef.current === null) return;
+    setDragOffset(e.clientX - dragStartXRef.current);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragStartXRef.current === null) return;
+    const delta = e.clientX - dragStartXRef.current;
+    dragStartXRef.current = null;
+    setIsDragging(false);
+    setDragOffset(0);
+
+    if (sorted.length > 1 && Math.abs(delta) > SWIPE_THRESHOLD_PX) {
+      if (delta < 0) advance();
+      else          rewind();
+    }
+    resetTimer();
+
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
 
   if (sorted.length === 0) return null;
 
@@ -146,8 +187,27 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
         </span>
       </div>
 
-      {/* Active story card */}
-      <div style={{ flex: 1, padding: "12px 14px", display: "flex", flexDirection: "column", gap: "8px", minHeight: 0 }}>
+      {/* Active story card — swipeable */}
+      <div
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        style={{
+          flex: 1,
+          padding: "12px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px",
+          minHeight: 0,
+          touchAction: "pan-y",
+          cursor: sorted.length > 1 ? (isDragging ? "grabbing" : "grab") : "default",
+          userSelect: isDragging ? "none" : "auto",
+          transform: `translateX(${dragOffset}px)`,
+          opacity: 1 - Math.min(0.4, Math.abs(dragOffset) / 400),
+          transition: isDragging ? "none" : "transform 0.25s ease, opacity 0.25s ease",
+        }}
+      >
         {/* Heat bar */}
         <HeatBar score={story.heat_score} />
 
@@ -235,7 +295,7 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
           }}
         >
           <button
-            onClick={() => { setActiveIdx((i) => (i - 1 + sorted.length) % sorted.length); resetTimer(); }}
+            onClick={() => { rewind(); resetTimer(); }}
             style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: "12px", padding: "0 4px", lineHeight: 1 }}
             aria-label="Previous"
           >
