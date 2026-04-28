@@ -5,7 +5,8 @@ import type { StoryOut } from "../services/api";
 
 const ROTATE_INTERVAL_MS = 6000;   // auto-advance every 6 s
 const BREAKING_COLOR     = "#FF2020";
-const SWIPE_THRESHOLD_PX = 60;     // distance required to commit a swipe
+const SWIPE_THRESHOLD_PX = 40;     // distance required to commit a slow swipe
+const FLICK_VELOCITY_PXMS = 0.35;  // px/ms — a fast flick commits even at short distance
 
 // ─── HeatBar — visual urgency indicator ──────────────────────────────────────
 
@@ -62,13 +63,8 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
   const [dragOffset, setDragOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Drag state — refs (not state) so handlers don't restart per render
-  const dragStartXRef = useRef<number | null>(null);
-  const dragStartYRef = useRef<number | null>(null);
-  // "unknown" until we've moved enough to classify; "horizontal" commits;
-  // "vertical" releases the gesture so the page can scroll naturally.
-  const intentRef     = useRef<"unknown" | "horizontal" | "vertical">("unknown");
-  const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
+  const swipeRef = useRef<HTMLDivElement | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const advance = useCallback(() => {
     setActiveIdx((i) => (i + 1) % sorted.length);
@@ -92,87 +88,109 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
   // Reset index when the stories list changes
   useEffect(() => { setActiveIdx(0); }, [sorted.length]);
 
-  // ─── Swipe core ─────────────────────────────────────────────────────────────
-  // Distance moved before we decide whether the gesture is horizontal vs vertical
-  const INTENT_THRESHOLD = 8;
+  // ─── Swipe — native event listeners (most reliable across browsers) ─────────
+  // Attaching natively (not via React synthetic events) avoids passive-listener
+  // edge cases on iOS Safari and ensures touchmove fires during the gesture.
+  useEffect(() => {
+    const el = swipeRef.current;
+    if (!el || sorted.length <= 1) return;
 
-  const beginDrag = (x: number, y: number, target: EventTarget | null): boolean => {
-    // Don't hijack clicks on interactive children (link, dot buttons, arrows)
-    if ((target as HTMLElement | null)?.closest("a, button")) return false;
-    dragStartXRef.current = x;
-    dragStartYRef.current = y;
-    intentRef.current     = "unknown";
-    if (timerRef.current) clearInterval(timerRef.current);
-    return true;
-  };
+    const INTENT_THRESHOLD = 6;
+    let startX = 0, startY = 0;
+    let lastX = 0, lastT = 0;          // last move sample (for velocity)
+    let intent: "unknown" | "horizontal" | "vertical" = "unknown";
+    let active = false;
 
-  const moveDrag = (x: number, y: number) => {
-    const sx = dragStartXRef.current, sy = dragStartYRef.current;
-    if (sx === null || sy === null) return;
-    const dx = x - sx;
-    const dy = y - sy;
-
-    if (intentRef.current === "unknown") {
-      if (Math.abs(dx) < INTENT_THRESHOLD && Math.abs(dy) < INTENT_THRESHOLD) return;
-      intentRef.current = Math.abs(dx) > Math.abs(dy) ? "horizontal" : "vertical";
-      if (intentRef.current === "horizontal") setIsDragging(true);
-      else {
-        // Vertical scroll — release so the page can scroll
-        dragStartXRef.current = null;
-        dragStartYRef.current = null;
-        return;
-      }
-    }
-    if (intentRef.current === "horizontal") setDragOffset(dx);
-  };
-
-  const endDrag = (x: number) => {
-    const sx = dragStartXRef.current;
-    const wasHorizontal = intentRef.current === "horizontal";
-    dragStartXRef.current = null;
-    dragStartYRef.current = null;
-    intentRef.current     = "unknown";
-    setIsDragging(false);
-    setDragOffset(0);
-    if (sx === null) { resetTimer(); return; }
-
-    const delta = x - sx;
-    if (wasHorizontal && sorted.length > 1 && Math.abs(delta) > SWIPE_THRESHOLD_PX) {
-      if (delta < 0) advance();
-      else          rewind();
-    }
-    resetTimer();
-  };
-
-  // ─── Touch handlers (mobile) ────────────────────────────────────────────────
-  const onTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    const t = e.touches[0];
-    beginDrag(t.clientX, t.clientY, e.target);
-  };
-  const onTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    const t = e.touches[0];
-    if (!t) return;
-    moveDrag(t.clientX, t.clientY);
-  };
-  const onTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
-    const t = e.changedTouches[0];
-    endDrag(t ? t.clientX : (dragStartXRef.current ?? 0));
-  };
-
-  // ─── Mouse handlers (desktop) ───────────────────────────────────────────────
-  // We attach move/up to the document so the drag survives the cursor leaving
-  // the carousel — required for a smooth desktop swipe-and-drag.
-  const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!beginDrag(e.clientX, e.clientY, e.target)) return;
-    const onMove = (ev: MouseEvent) => moveDrag(ev.clientX, ev.clientY);
-    const onUp   = (ev: MouseEvent) => {
-      endDrag(ev.clientX);
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup",   onUp);
+    const begin = (x: number, y: number, target: EventTarget | null): boolean => {
+      if ((target as HTMLElement | null)?.closest("a, button")) return false;
+      startX = x; startY = y;
+      lastX  = x; lastT  = performance.now();
+      intent = "unknown";
+      active = true;
+      if (timerRef.current) clearInterval(timerRef.current);
+      return true;
     };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup",   onUp);
-  };
+
+    const move = (x: number, y: number, ev?: Event) => {
+      if (!active) return;
+      const dx = x - startX, dy = y - startY;
+      if (intent === "unknown") {
+        if (Math.abs(dx) < INTENT_THRESHOLD && Math.abs(dy) < INTENT_THRESHOLD) return;
+        intent = Math.abs(dx) > Math.abs(dy) ? "horizontal" : "vertical";
+        if (intent === "horizontal") setIsDragging(true);
+        else { active = false; return; }   // hand off vertical scroll to the browser
+      }
+      if (intent === "horizontal") {
+        // Block the browser from also reading this as a scroll
+        if (ev && ev.cancelable) ev.preventDefault();
+        setDragOffset(dx);
+        lastX = x; lastT = performance.now();
+      }
+    };
+
+    const end = (x: number) => {
+      if (!active && intent !== "horizontal") { resetTimer(); return; }
+      const wasHorizontal = intent === "horizontal";
+      const delta = x - startX;
+      // Velocity over the LAST move sample, not whole gesture — a slow drag
+      // followed by a quick release should still register as a flick.
+      const elapsed = Math.max(1, performance.now() - lastT);
+      const velocity = Math.abs((x - lastX) / elapsed);   // px / ms
+      active = false;
+      intent = "unknown";
+      setIsDragging(false);
+      setDragOffset(0);
+      if (wasHorizontal) {
+        const distancePass = Math.abs(delta) > SWIPE_THRESHOLD_PX;
+        const flickPass    = velocity > FLICK_VELOCITY_PXMS && Math.abs(delta) > 10;
+        if (distancePass || flickPass) {
+          if (delta < 0) advance(); else rewind();
+        }
+      }
+      resetTimer();
+    };
+
+    // Touch
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0]; if (!t) return;
+      begin(t.clientX, t.clientY, e.target);
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const t = e.touches[0]; if (!t) return;
+      move(t.clientX, t.clientY, e);
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const t = e.changedTouches[0];
+      end(t ? t.clientX : startX);
+    };
+
+    // Mouse
+    const onMouseDown = (e: MouseEvent) => {
+      if (!begin(e.clientX, e.clientY, e.target)) return;
+      const onMove = (ev: MouseEvent) => move(ev.clientX, ev.clientY);
+      const onUp   = (ev: MouseEvent) => {
+        end(ev.clientX);
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup",   onUp);
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup",   onUp);
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove",  onTouchMove,  { passive: false });  // need to preventDefault
+    el.addEventListener("touchend",   onTouchEnd);
+    el.addEventListener("touchcancel", onTouchEnd);
+    el.addEventListener("mousedown",  onMouseDown);
+
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove",  onTouchMove);
+      el.removeEventListener("touchend",   onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+      el.removeEventListener("mousedown",  onMouseDown);
+    };
+  }, [sorted.length, advance, rewind, resetTimer]);
 
   if (sorted.length === 0) return null;
 
@@ -242,13 +260,9 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
         </span>
       </div>
 
-      {/* Active story card — swipeable */}
+      {/* Active story card — swipeable (handlers attached natively in useEffect) */}
       <div
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchEnd}
-        onMouseDown={onMouseDown}
+        ref={swipeRef}
         style={{
           flex: 1,
           padding: "12px 14px",
@@ -256,7 +270,8 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
           flexDirection: "column",
           gap: "8px",
           minHeight: 0,
-          // Allow vertical scroll, capture horizontal swipes
+          // Allow vertical scroll until intent classifies as horizontal,
+          // at which point our touchmove handler preventDefaults to take over.
           touchAction: "pan-y",
           cursor: sorted.length > 1 ? (isDragging ? "grabbing" : "grab") : "default",
           userSelect: isDragging ? "none" : "auto",
@@ -338,57 +353,83 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
         </a>
       </div>
 
-      {/* Dot navigation + arrows */}
-      {sorted.length > 1 && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "10px",
-            padding: "8px 14px 10px",
-            borderTop: `1px solid ${BREAKING_COLOR}14`,
-            flexShrink: 0,
-          }}
-        >
-          <button
-            onClick={() => { rewind(); resetTimer(); }}
-            style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: "12px", padding: "0 4px", lineHeight: 1 }}
-            aria-label="Previous"
+      {/* Dot navigation + arrows — capped at 4 dots even for many stories */}
+      {sorted.length > 1 && (() => {
+        const MAX_DOTS  = 4;
+        const dotCount  = Math.min(MAX_DOTS, sorted.length);
+        // Evenly distribute the dots across the carousel — for 10 stories with
+        // 4 dots, the dots correspond to story indexes [0, 2, 5, 7].
+        const dotTarget = (i: number) => Math.floor((i * sorted.length) / dotCount);
+        const activeDot = Math.min(
+          dotCount - 1,
+          Math.floor((activeIdx * dotCount) / sorted.length)
+        );
+        const arrowBtn: React.CSSProperties = {
+          background: "none",
+          border: "none",
+          color: "#94a3b8",
+          cursor: "pointer",
+          fontSize: "18px",
+          lineHeight: 1,
+          padding: "4px 8px",
+          borderRadius: "6px",
+          transition: "color 0.15s ease, background 0.15s ease",
+        };
+        return (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "8px",
+              padding: "8px 20px 10px",
+              borderTop: `1px solid ${BREAKING_COLOR}14`,
+              flexShrink: 0,
+            }}
           >
-            ‹
-          </button>
+            <button
+              onClick={() => { rewind(); resetTimer(); }}
+              style={arrowBtn}
+              aria-label="Previous story"
+              onMouseEnter={(e) => { e.currentTarget.style.color = BREAKING_COLOR; e.currentTarget.style.background = `${BREAKING_COLOR}14`; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "#94a3b8"; e.currentTarget.style.background = "none"; }}
+            >
+              ‹
+            </button>
 
-          <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
-            {sorted.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => { setActiveIdx(i); resetTimer(); }}
-                style={{
-                  width: i === activeIdx ? "16px" : "5px",
-                  height: "5px",
-                  borderRadius: "3px",
-                  background: i === activeIdx ? BREAKING_COLOR : "#334155",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: 0,
-                  transition: "width 0.2s ease, background 0.2s ease",
-                  boxShadow: i === activeIdx ? `0 0 6px ${BREAKING_COLOR}` : "none",
-                }}
-                aria-label={`Go to story ${i + 1}`}
-              />
-            ))}
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              {Array.from({ length: dotCount }, (_, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setActiveIdx(dotTarget(i)); resetTimer(); }}
+                  style={{
+                    width:  i === activeDot ? "18px" : "6px",
+                    height: "6px",
+                    borderRadius: "3px",
+                    background: i === activeDot ? BREAKING_COLOR : "#334155",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    transition: "width 0.2s ease, background 0.2s ease",
+                    boxShadow: i === activeDot ? `0 0 6px ${BREAKING_COLOR}` : "none",
+                  }}
+                  aria-label={`Jump to story ${dotTarget(i) + 1}`}
+                />
+              ))}
+            </div>
+
+            <button
+              onClick={() => { advance(); resetTimer(); }}
+              style={arrowBtn}
+              aria-label="Next story"
+              onMouseEnter={(e) => { e.currentTarget.style.color = BREAKING_COLOR; e.currentTarget.style.background = `${BREAKING_COLOR}14`; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "#94a3b8"; e.currentTarget.style.background = "none"; }}
+            >
+              ›
+            </button>
           </div>
-
-          <button
-            onClick={() => { advance(); resetTimer(); }}
-            style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: "12px", padding: "0 4px", lineHeight: 1 }}
-            aria-label="Next"
-          >
-            ›
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Inline keyframes for the pulsing dot */}
       <style>{`
