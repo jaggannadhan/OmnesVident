@@ -208,17 +208,28 @@ function StateFocusBar({ country, focusState, onFocusState }: StateFocusBarProps
 interface GlobeSceneProps {
   /** Optional: restrict blips to a region; undefined = global */
   region?: string;
-  /** Optional: restrict blips to a category; undefined = all */
-  category?: string;
+  /** Multi-select category filter. [] = all. */
+  categories: string[];
   /** ISO-8601 — show stories on or after this timestamp */
   startDate?: string;
   /** ISO-8601 — show stories on or before this timestamp */
   endDate?: string;
 }
 
-export function GlobeScene({ region, category, startDate, endDate }: GlobeSceneProps) {
-  const { data } = useNews({ region, category, limit: 1000, start_date: startDate, end_date: endDate });
-  const stories = data?.stories ?? [];
+export function GlobeScene({ region, categories, startDate, endDate }: GlobeSceneProps) {
+  // Server-side filter when exactly one category is picked; otherwise fetch all
+  // and apply the multi-category filter client-side. React Query keeps the
+  // network call deduped with GlobeWithCarousel's identical fetch.
+  const apiCategory = categories.length === 1 ? categories[0] : undefined;
+  const { data } = useNews({
+    region, category: apiCategory, limit: 1000,
+    start_date: startDate, end_date: endDate,
+  });
+  const allStories = data?.stories ?? [];
+  const stories =
+    categories.length >= 2
+      ? allStories.filter((s) => categories.includes(s.category))
+      : allStories;
 
   // Pause auto-rotation while the cursor is over the globe
   const [cursorOver, setCursorOver] = useState(false);

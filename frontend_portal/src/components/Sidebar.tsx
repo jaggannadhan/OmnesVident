@@ -1,5 +1,6 @@
 import { CATEGORY_META } from "./NewsCard";
 import { RegionCombobox } from "./RegionCombobox";
+import { CategoryDropdown } from "./CategoryDropdown";
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -21,19 +22,19 @@ function SidebarSection({ title, children }: { title: string; children: React.Re
 // ---------------------------------------------------------------------------
 
 interface SidebarProps {
-  selectedCategory: string | undefined;
+  selectedCategories: string[];
   selectedRegion: string | undefined;
-  onCategorySelect: (category: string | undefined) => void;
+  onCategoriesChange: (categories: string[]) => void;
   onRegionSelect: (region: string | undefined) => void;
 }
 
 export function Sidebar({
-  selectedCategory,
+  selectedCategories,
   selectedRegion,
-  onCategorySelect,
+  onCategoriesChange,
   onRegionSelect,
 }: SidebarProps) {
-  const hasFilters = !!(selectedCategory || selectedRegion);
+  const hasFilters = selectedCategories.length > 0 || !!selectedRegion;
 
   return (
     <aside className="flex flex-col gap-6 h-full overflow-y-auto py-4 px-3">
@@ -56,14 +57,17 @@ export function Sidebar({
                 {selectedRegion}
               </span>
             )}
-            {selectedCategory && (
-              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ring-1 ${CATEGORY_META[selectedCategory]?.bgClass ?? ""} ${CATEGORY_META[selectedCategory]?.colorClass ?? ""}`}>
-                {CATEGORY_META[selectedCategory]?.label ?? selectedCategory}
+            {selectedCategories.map((cat) => (
+              <span
+                key={cat}
+                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ring-1 ${CATEGORY_META[cat]?.bgClass ?? ""} ${CATEGORY_META[cat]?.colorClass ?? ""}`}
+              >
+                {CATEGORY_META[cat]?.label ?? cat}
               </span>
-            )}
+            ))}
           </div>
           <button
-            onClick={() => { onCategorySelect(undefined); onRegionSelect(undefined); }}
+            onClick={() => { onCategoriesChange([]); onRegionSelect(undefined); }}
             className="mt-1 text-[10px] text-slate-500 hover:text-red-400 transition-colors text-left"
           >
             ✕ Clear all filters
@@ -71,30 +75,12 @@ export function Sidebar({
         </div>
       )}
 
-      {/* Categories */}
+      {/* Category — multi-select dropdown */}
       <SidebarSection title="Category">
-        <div className="flex flex-col gap-0.5">
-          {Object.entries(CATEGORY_META).map(([key, meta]) => {
-            const isActive = selectedCategory === key;
-            return (
-              <button
-                key={key}
-                onClick={() => onCategorySelect(isActive ? undefined : key)}
-                className={`flex items-center gap-2.5 w-full text-left rounded-lg px-2.5 py-1.5 text-xs transition-all duration-150 ${
-                  isActive
-                    ? `${meta.bgClass} ${meta.colorClass} ring-1`
-                    : "text-slate-400 hover:text-slate-200 hover:bg-panel"
-                }`}
-                aria-pressed={isActive}
-              >
-                <span className="text-sm leading-none w-4 text-center" aria-hidden="true">
-                  {meta.icon}
-                </span>
-                <span className="font-medium">{meta.label}</span>
-              </button>
-            );
-          })}
-        </div>
+        <CategoryDropdown
+          selectedCategories={selectedCategories}
+          onChange={onCategoriesChange}
+        />
       </SidebarSection>
 
       {/* Regions — searchable combobox grouped by continent */}

@@ -18,21 +18,38 @@ const GlobeScene = lazy(() =>
 // GlobeWithCarousel — 70/30 layout: globe left, breaking carousel right
 // ---------------------------------------------------------------------------
 
+// When exactly one category is selected, the backend can filter server-side.
+// For 0 or 2+ we fetch unfiltered and let consumers apply a client-side filter.
+function apiCategoryOf(cats: string[]): string | undefined {
+  return cats.length === 1 ? cats[0] : undefined;
+}
+
+function applyCategoryFilter<T extends { category: string }>(
+  stories: T[],
+  categories: string[],
+): T[] {
+  if (categories.length === 0) return stories;
+  if (categories.length === 1) return stories;   // already filtered server-side
+  return stories.filter((s) => categories.includes(s.category));
+}
+
 interface GlobeWithCarouselProps {
   regionCode?: string;
-  category?: string;
+  categories: string[];
   dateRange: DateRange;
 }
 
-function GlobeWithCarousel({ regionCode, category, dateRange }: GlobeWithCarouselProps) {
+function GlobeWithCarousel({ regionCode, categories, dateRange }: GlobeWithCarouselProps) {
+  const apiCategory = apiCategoryOf(categories);
   const { data } = useNews({
     region: regionCode,
-    category,
+    category: apiCategory,
     limit: 1000,
     start_date: dateRange.start,
     end_date: dateRange.end,
   });
-  const breakingStories = (data?.stories ?? []).filter((s) => s.is_breaking);
+  const visible = applyCategoryFilter(data?.stories ?? [], categories);
+  const breakingStories = visible.filter((s) => s.is_breaking);
 
   return (
     <div style={{ display: "flex", gap: "12px", alignItems: "stretch", height: "480px" }}>
@@ -51,7 +68,7 @@ function GlobeWithCarousel({ regionCode, category, dateRange }: GlobeWithCarouse
           >
             <GlobeScene
               region={regionCode}
-              category={category}
+              categories={categories}
               startDate={dateRange.start}
               endDate={dateRange.end}
             />
@@ -74,15 +91,17 @@ function GlobeWithCarousel({ regionCode, category, dateRange }: GlobeWithCarouse
 // React Query dedupes the underlying useNews call against GlobeWithCarousel.
 // ---------------------------------------------------------------------------
 
-function MobileBreakingNews({ regionCode, category, dateRange }: GlobeWithCarouselProps) {
+function MobileBreakingNews({ regionCode, categories, dateRange }: GlobeWithCarouselProps) {
+  const apiCategory = apiCategoryOf(categories);
   const { data } = useNews({
     region: regionCode,
-    category,
+    category: apiCategory,
     limit: 1000,
     start_date: dateRange.start,
     end_date: dateRange.end,
   });
-  const breakingStories = (data?.stories ?? []).filter((s) => s.is_breaking);
+  const visible = applyCategoryFilter(data?.stories ?? [], categories);
+  const breakingStories = visible.filter((s) => s.is_breaking);
   if (breakingStories.length === 0) return null;
   return (
     <div style={{ height: "260px" }}>
@@ -115,7 +134,7 @@ function FeedView() {
   const { regionCode } = useParams<{ regionCode?: string }>();
   const navigate = useNavigate();
 
-  const [category, setCategory] = useState<string | undefined>();
+  const [categories, setCategories] = useState<string[]>([]);
   const [offset, setOffset] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -142,13 +161,16 @@ function FeedView() {
     [navigate]
   );
 
-  const handleCategorySelect = useCallback((cat: string | undefined) => {
-    setCategory(cat);
+  const handleCategoriesChange = useCallback((next: string[]) => {
+    setCategories(next);
     setOffset(0);
   }, []);
 
+  // Toggle a single category in/out of the multi-select (used by NewsCard chip click)
   const handleCategoryClick = useCallback((cat: string) => {
-    setCategory((prev) => (prev === cat ? undefined : cat));
+    setCategories((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+    );
     setOffset(0);
   }, []);
 
@@ -177,9 +199,9 @@ function FeedView() {
         aria-label="Navigation"
       >
         <Sidebar
-          selectedCategory={category}
+          selectedCategories={categories}
           selectedRegion={regionCode}
-          onCategorySelect={handleCategorySelect}
+          onCategoriesChange={handleCategoriesChange}
           onRegionSelect={handleRegionSelect}
         />
       </nav>
@@ -224,10 +246,18 @@ function FeedView() {
                 <span className="font-mono font-semibold text-cyan-400">{regionCode}</span>
               </>
             )}
-            {category && (
+            {categories.length === 1 && (
               <>
                 <span className="text-slate-700">/</span>
-                <span className="text-slate-300">{category}</span>
+                <span className="text-slate-300">{categories[0]}</span>
+              </>
+            )}
+            {categories.length > 1 && (
+              <>
+                <span className="text-slate-700">/</span>
+                <span className="text-slate-300 font-mono text-xs">
+                  {categories.length} categories
+                </span>
               </>
             )}
           </div>
@@ -273,7 +303,7 @@ function FeedView() {
               <div className="hidden md:block">
                 <GlobeWithCarousel
                   regionCode={regionCode}
-                  category={category}
+                  categories={categories}
                   dateRange={dateRange}
                 />
               </div>
@@ -283,7 +313,7 @@ function FeedView() {
             <div className="md:hidden flex flex-col gap-4">
               <MobileBreakingNews
                 regionCode={regionCode}
-                category={category}
+                categories={categories}
                 dateRange={dateRange}
               />
               <WorldMap
@@ -294,7 +324,7 @@ function FeedView() {
 
             <NewsGrid
               region={regionCode}
-              category={category}
+              categories={categories}
               offset={offset}
               limit={24}
               startDate={dateRange.start}

@@ -32,8 +32,12 @@ function SkeletonCard() {
 // Empty & error states
 // ---------------------------------------------------------------------------
 
-function EmptyState({ region, category }: { region?: string; category?: string }) {
-  const filters = [region && `region: ${region}`, category && `category: ${category}`]
+function EmptyState({ region, categories }: { region?: string; categories: string[] }) {
+  const catFilter =
+    categories.length === 0 ? null
+    : categories.length === 1 ? `category: ${categories[0]}`
+    : `${categories.length} categories`;
+  const filters = [region && `region: ${region}`, catFilter]
     .filter(Boolean)
     .join(", ");
   return (
@@ -105,7 +109,8 @@ function Pagination({ offset, limit, total, onPageChange }: PaginationProps) {
 
 interface NewsGridProps {
   region?: string;
-  category?: string;
+  /** Multi-select category state. [] = all. 1 = server-side filter. 2+ = client-side filter. */
+  categories: string[];
   offset?: number;
   limit?: number;
   startDate?: string;
@@ -117,7 +122,7 @@ interface NewsGridProps {
 
 export function NewsGrid({
   region,
-  category,
+  categories,
   offset = 0,
   limit = 24,
   startDate,
@@ -126,14 +131,28 @@ export function NewsGrid({
   onCategoryClick,
   onRegionClick,
 }: NewsGridProps) {
+  // Server-side filter only when exactly one category is picked. Otherwise we
+  // fetch a wider page (limit 1000) and paginate client-side after filtering.
+  const multi        = categories.length >= 2;
+  const apiCategory  = categories.length === 1 ? categories[0] : undefined;
+  const apiOffset    = multi ? 0    : offset;
+  const apiLimit     = multi ? 1000 : limit;
+
   const { data, isLoading, isError, error, isFetching } = useNews({
     region,
-    category,
-    offset,
-    limit,
+    category: apiCategory,
+    offset: apiOffset,
+    limit: apiLimit,
     start_date: startDate,
     end_date: endDate,
   });
+
+  // Client-side filter + paginate when 2+ categories are picked.
+  const allFiltered = multi
+    ? (data?.stories ?? []).filter((s) => categories.includes(s.category))
+    : (data?.stories ?? []);
+  const total       = multi ? allFiltered.length : (data?.total ?? 0);
+  const pageStories = multi ? allFiltered.slice(offset, offset + limit) : allFiltered;
 
   return (
     <div className="flex flex-col gap-4">
@@ -142,9 +161,14 @@ export function NewsGrid({
       <div className="flex items-center justify-between h-5">
         {data && (
           <p className="text-xs text-slate-500">
-            <span className="text-slate-300 font-semibold">{data.total}</span> stories
+            <span className="text-slate-300 font-semibold">{total}</span> stories
             {region && <> in <span className="font-mono text-slate-300">{region}</span></>}
-            {category && <> · <span className="text-slate-300">{category}</span></>}
+            {categories.length === 1 && (
+              <> · <span className="text-slate-300">{categories[0]}</span></>
+            )}
+            {categories.length >= 2 && (
+              <> · <span className="text-slate-300">{categories.length} categories</span></>
+            )}
           </p>
         )}
         {isFetching && !isLoading && (
@@ -164,11 +188,11 @@ export function NewsGrid({
           <ErrorState message={(error as Error).message} />
         )}
 
-        {data?.stories.length === 0 && !isLoading && (
-          <EmptyState region={region} category={category} />
+        {pageStories.length === 0 && !isLoading && (
+          <EmptyState region={region} categories={categories} />
         )}
 
-        {data?.stories.map((story) => (
+        {pageStories.map((story) => (
           <NewsCard
             key={story.dedup_group_id}
             story={story}
@@ -182,7 +206,7 @@ export function NewsGrid({
           <Pagination
             offset={offset}
             limit={limit}
-            total={data.total}
+            total={total}
             onPageChange={(o) => onOffsetChange?.(o)}
           />
         )}
