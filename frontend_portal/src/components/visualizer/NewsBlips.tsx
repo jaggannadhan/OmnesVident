@@ -1,12 +1,17 @@
 import { useMemo } from "react";
+import { Html } from "@react-three/drei";
+import type { Vector3 } from "three";
 import type { StoryOut } from "../../services/api";
-import { latLngToVector3, regionToVector3, applyJitter } from "./utils/geoUtils";
-import { Marker } from "./Marker";
+import { latLngToVector3, regionToVector3 } from "./utils/geoUtils";
+import { Marker, CATEGORY_COLORS } from "./Marker";
 import { HudOverlay } from "./HudOverlay";
 import { GLOBE_RADIUS } from "./Earth";
 
 /** Place markers just above the globe surface */
 const MARKER_RADIUS = GLOBE_RADIUS + 0.04;
+
+/** Show the +N count badge once a cluster has at least this many stories */
+const BADGE_THRESHOLD = 3;
 
 interface NewsBlipsProps {
   stories: StoryOut[];
@@ -17,72 +22,150 @@ interface NewsBlipsProps {
   focusState?: string | null;
 }
 
-/** Stable integer seed from a story's dedup_group_id */
-function idSeed(id: string): number {
-  return id.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+interface Cluster {
+  representative:   StoryOut;     // story rendered + opened on click
+  ids:              string[];     // every story id in this bucket
+  count:            number;
+  dominantCategory: string;
+  color:            string;       // dominant-category colour, or red if any breaking
+  hasBreaking:      boolean;
+  position:         Vector3;
+}
+
+/** Build a coordinate-bucket key (~1km granularity at 2 dp). */
+function bucketKey(pos: Vector3): string {
+  return `${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}`;
+}
+
+/**
+ * Pick the representative story for a cluster:
+ *   1. prefer breaking news (highest heat_score)
+ *   2. otherwise highest heat_score
+ *   3. tie-break on most recent timestamp
+ */
+function pickRepresentative(group: StoryOut[]): StoryOut {
+  const breaking = group.filter((s) => s.is_breaking);
+  const pool = breaking.length > 0 ? breaking : group;
+  return [...pool].sort((a, b) => {
+    if (b.heat_score !== a.heat_score) return b.heat_score - a.heat_score;
+    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+  })[0];
+}
+
+/** Most-frequent category in a group; ties resolved by alphabetical order. */
+function dominantCategory(group: StoryOut[]): string {
+  const counts: Record<string, number> = {};
+  for (const s of group) counts[s.category] = (counts[s.category] ?? 0) + 1;
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
 }
 
 export function NewsBlips({ stories, selectedId, onSelectId, focusState }: NewsBlipsProps) {
-  // Count how many stories share the same resolved coordinate key so
-  // jitter magnitude and glow can scale accordingly.
-  const storyPositions = useMemo(() => {
-    // First pass: resolve base positions without jitter
-    const base = stories.map((story) => ({
+  const clusters = useMemo<Cluster[]>(() => {
+    // Resolve each story to a position on the globe
+    const placed = stories.map((story) => ({
       story,
-      basePos:
+      pos:
         story.latitude != null && story.longitude != null
           ? latLngToVector3(story.latitude, story.longitude, MARKER_RADIUS)
           : regionToVector3(story.region_code, MARKER_RADIUS),
     }));
 
-    // Count stories per coordinate bucket (rounded to 2 dp) for density
-    const bucketCounts: Record<string, number> = {};
-    for (const { basePos } of base) {
-      const key = `${basePos.x.toFixed(2)},${basePos.y.toFixed(2)},${basePos.z.toFixed(2)}`;
-      bucketCounts[key] = (bucketCounts[key] ?? 0) + 1;
+    // Group by coordinate bucket
+    const groups = new Map<string, { pos: Vector3; items: StoryOut[] }>();
+    for (const { story, pos } of placed) {
+      const k = bucketKey(pos);
+      const existing = groups.get(k);
+      if (existing) existing.items.push(story);
+      else groups.set(k, { pos, items: [story] });
     }
 
-    // Second pass: apply jitter and attach density count
-    return base.map(({ story, basePos }) => {
-      const key = `${basePos.x.toFixed(2)},${basePos.y.toFixed(2)},${basePos.z.toFixed(2)}`;
-      const density = bucketCounts[key] ?? 1;
-      const seed    = idSeed(story.dedup_group_id);
-
-      // Scale jitter with density so crowded regions spread further;
-      // single stories stay essentially in place (magnitude ≈ 0).
-      // Cap at 0.026 world-units (≈ 170 km on Earth) so dense clusters
-      // in geographically tight regions (e.g. IN-TN next to Sri Lanka)
-      // don't bleed across international borders.
-      const magnitude = density > 1 ? 0.010 + Math.min(density - 1, 8) * 0.002 : 0;
-      const position  = magnitude > 0 ? applyJitter(basePos, seed, magnitude) : basePos;
-
-      return { story, position, density };
+    // Build a Cluster per bucket
+    return Array.from(groups.values()).map(({ pos, items }) => {
+      const rep         = pickRepresentative(items);
+      const cat         = dominantCategory(items);
+      const hasBreaking = items.some((s) => s.is_breaking);
+      const color       = hasBreaking
+        ? "#FF2020"
+        : (CATEGORY_COLORS[cat] ?? "#A78BFA");
+      return {
+        representative:   rep,
+        ids:              items.map((s) => s.dedup_group_id),
+        count:            items.length,
+        dominantCategory: cat,
+        color,
+        hasBreaking,
+        position:         pos,
+      };
     });
   }, [stories]);
 
-  const selected = storyPositions.find((s) => s.story.dedup_group_id === selectedId);
+  // Find the cluster whose representative is currently selected
+  const selectedCluster = clusters.find(
+    (c) => c.representative.dedup_group_id === selectedId
+  );
 
   return (
     <>
-      {storyPositions.map(({ story, position, density }) => (
-        <Marker
-          key={story.dedup_group_id}
-          story={story}
-          position={position}
-          isSelected={story.dedup_group_id === selectedId}
-          regionCount={density}
-          dimmed={focusState != null && story.region_code !== focusState}
-          renderOrder={story.region_code.includes("-") ? 2 : 1}
-          onClick={() =>
-            onSelectId(selectedId === story.dedup_group_id ? null : story.dedup_group_id)
-          }
-        />
-      ))}
+      {clusters.map((c) => {
+        const id = c.representative.dedup_group_id;
+        const dimmed = focusState != null && c.representative.region_code !== focusState;
+        return (
+          <Marker
+            key={id}
+            story={c.representative}
+            position={c.position}
+            isSelected={id === selectedId}
+            regionCount={c.count}
+            clusterColor={c.color}
+            dimmed={dimmed}
+            renderOrder={c.representative.region_code.includes("-") ? 2 : 1}
+            onClick={() => onSelectId(selectedId === id ? null : id)}
+          />
+        );
+      })}
 
-      {selected && (
+      {/* Count badges — only on multi-story clusters that aren't dimmed away */}
+      {clusters
+        .filter(
+          (c) =>
+            c.count >= BADGE_THRESHOLD &&
+            !(focusState != null && c.representative.region_code !== focusState)
+        )
+        .map((c) => (
+          <Html
+            key={`badge-${c.representative.dedup_group_id}`}
+            position={c.position}
+            center
+            distanceFactor={1.4}
+            style={{ pointerEvents: "none" }}
+            zIndexRange={[10, 0]}
+          >
+            <div
+              style={{
+                transform: "translate(14px, -14px)",
+                padding: "1px 5px",
+                fontFamily: "JetBrains Mono, Menlo, monospace",
+                fontSize: "9px",
+                fontWeight: 700,
+                color: c.color,
+                background: "rgba(8,10,24,0.85)",
+                border: `1px solid ${c.color}55`,
+                borderRadius: "8px",
+                whiteSpace: "nowrap",
+                boxShadow: `0 0 6px ${c.color}55`,
+                userSelect: "none",
+              }}
+            >
+              +{c.count}
+            </div>
+          </Html>
+        ))}
+
+      {selectedCluster && (
         <HudOverlay
-          story={selected.story}
-          position={selected.position}
+          story={selectedCluster.representative}
+          position={selectedCluster.position}
           onClose={() => onSelectId(null)}
         />
       )}

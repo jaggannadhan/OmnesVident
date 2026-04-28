@@ -31,10 +31,17 @@ interface MarkerProps {
    * are never occluded by broad national placeholders at the same centroid.
    */
   renderOrder?: number;
+  /**
+   * Override colour. Used by clustering in NewsBlips so the blip reflects the
+   * dominant category in its bucket instead of the representative story's
+   * category. Falls back to per-story category colour when omitted.
+   */
+  clusterColor?: string;
 }
 
 export const Marker = memo(function Marker({
   story, position, isSelected, onClick, regionCount, dimmed = false, renderOrder = 1,
+  clusterColor,
 }: MarkerProps) {
   const pulseRef  = useRef<Mesh>(null);
   const matRef    = useRef<MeshBasicMaterial>(null);
@@ -46,11 +53,13 @@ export const Marker = memo(function Marker({
     [story.dedup_group_id]
   );
 
-  const color = story.is_breaking ? "#FF2020" : (CATEGORY_COLORS[story.category] ?? "#ffffff");
+  const color = clusterColor
+    ?? (story.is_breaking ? "#FF2020" : (CATEGORY_COLORS[story.category] ?? "#ffffff"));
 
-  // Scale dot size down as more stories share the same region; min 0.012
+  // Cluster blips scale UP with the number of stories in the bucket so dense
+  // regions read as larger pulses; single-story blips stay at the baseline size.
   const baseRadius = useMemo(
-    () => Math.max(0.012, 0.038 / Math.sqrt(regionCount)),
+    () => 0.022 + Math.min(0.034, Math.sqrt(Math.max(0, regionCount - 1)) * 0.011),
     [regionCount]
   );
   const haloRadius = baseRadius * 1.7;
