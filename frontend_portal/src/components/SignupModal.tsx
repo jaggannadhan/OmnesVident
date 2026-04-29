@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "../hooks/useAuth";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
@@ -102,7 +103,9 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
   const blurOn = (e: React.FocusEvent<HTMLInputElement>) =>
     (e.target.style.borderColor = "rgba(148,163,184,0.18)");
 
-  return (
+  // Render via a portal so the modal isn't trapped inside the sidebar's
+  // transform context (Tailwind's `transform` class re-anchors `position: fixed`).
+  return createPortal(
     <div
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
@@ -232,6 +235,7 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
           </p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

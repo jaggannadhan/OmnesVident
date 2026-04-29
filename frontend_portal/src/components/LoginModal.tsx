@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "../hooks/useAuth";
 
 interface LoginModalProps {
@@ -32,6 +33,10 @@ export function LoginModal({ open, onClose, onSwitchToSignup }: LoginModalProps)
 
   if (!open) return null;
 
+  // Render via a portal so the modal isn't trapped inside any transformed
+  // ancestor (the sidebar uses CSS `transform` for slide-in/out, which would
+  // otherwise re-anchor `position: fixed` and pin the modal inside the sidebar).
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -48,7 +53,7 @@ export function LoginModal({ open, onClose, onSwitchToSignup }: LoginModalProps)
     }
   }
 
-  return (
+  return createPortal(
     <div
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
@@ -164,6 +169,7 @@ export function LoginModal({ open, onClose, onSwitchToSignup }: LoginModalProps)
           </p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
