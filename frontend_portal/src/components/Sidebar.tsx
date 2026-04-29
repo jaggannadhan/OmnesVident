@@ -1,7 +1,7 @@
 import { CATEGORY_META } from "./NewsCard";
 import { RegionCombobox } from "./RegionCombobox";
 import { CategoryDropdown } from "./CategoryDropdown";
-import { AuthButton } from "./AuthButton";
+import { GlobeControls, type DateRange } from "./GlobeControls";
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -25,30 +25,31 @@ function SidebarSection({ title, children }: { title: string; children: React.Re
 interface SidebarProps {
   selectedCategories: string[];
   selectedRegion: string | undefined;
+  dateRange: DateRange;
   onCategoriesChange: (categories: string[]) => void;
   onRegionSelect: (region: string | undefined) => void;
+  onDateRangeChange: (range: DateRange) => void;
 }
 
 export function Sidebar({
   selectedCategories,
   selectedRegion,
+  dateRange,
   onCategoriesChange,
   onRegionSelect,
+  onDateRangeChange,
 }: SidebarProps) {
   const hasFilters = selectedCategories.length > 0 || !!selectedRegion;
 
   return (
     <aside className="flex flex-col gap-6 h-full overflow-y-auto py-4 px-3">
 
-      {/* Logo + auth control */}
-      <div className="flex items-start justify-between gap-2 px-1 pb-2 border-b border-rim">
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <h1 className="text-base font-bold tracking-tight text-white">
-            Omnes<span className="text-cyan-400">Vident</span>
-          </h1>
-          <p className="text-[10px] text-slate-600 font-mono">Global News Discovery</p>
-        </div>
-        <AuthButton />
+      {/* Logo */}
+      <div className="flex flex-col gap-0.5 px-1 pb-2 border-b border-rim">
+        <h1 className="text-base font-bold tracking-tight text-white">
+          Omnes<span className="text-cyan-400">Vident</span>
+        </h1>
+        <p className="text-[10px] text-slate-600 font-mono">Global News Discovery</p>
       </div>
 
       {/* Active filters summary */}
@@ -93,6 +94,11 @@ export function Sidebar({
           selectedRegion={selectedRegion}
           onSelect={onRegionSelect}
         />
+      </SidebarSection>
+
+      {/* Date filter — preset badges + optional custom range */}
+      <SidebarSection title="Date">
+        <GlobeControls value={dateRange} onChange={onDateRangeChange} />
       </SidebarSection>
 
       {/* Fair use footer */}

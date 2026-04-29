@@ -117,7 +117,7 @@ export function GlobeControls({ onChange }: GlobeControlsProps) {
   const [activePreset, setActivePreset] = useState<PresetKey>("today");
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
 
   const [customFrom, setCustomFrom] = useState<string>(() => toDateInputValue(daysAgoMidnight(7)));
   const [toEnabled, setToEnabled] = useState(false);
@@ -156,7 +156,8 @@ export function GlobeControls({ onChange }: GlobeControlsProps) {
     if (rect) {
       setDropdownPos({
         top:   rect.bottom + 6,
-        right: window.innerWidth - rect.right,
+        left:  rect.left,
+        width: rect.width,
       });
     }
     setDropdownOpen(true);
@@ -236,10 +237,11 @@ export function GlobeControls({ onChange }: GlobeControlsProps) {
       style={{
         position: "fixed",
         top:      dropdownPos.top,
-        right:    dropdownPos.right,
+        left:     dropdownPos.left,
+        width:    Math.max(dropdownPos.width, 240),
         zIndex:   9999,
       }}
-      className="min-w-[240px] rounded-lg border border-rim bg-[rgba(8,10,24,0.97)] shadow-2xl flex flex-col"
+      className="rounded-lg border border-rim bg-[rgba(8,10,24,0.97)] shadow-2xl flex flex-col"
     >
       {/* Preset badges */}
       <div className="p-3 flex flex-wrap gap-1.5 border-b border-rim/60">
@@ -328,27 +330,25 @@ export function GlobeControls({ onChange }: GlobeControlsProps) {
   ) : null;
 
   return (
-    <div className="flex items-center" role="group" aria-label="Date filter">
+    <>
       <button
         ref={triggerRef}
         onClick={toggleDropdown}
         aria-haspopup="listbox"
         aria-expanded={dropdownOpen}
         title={`Date filter — currently ${activeLabel}`}
-        className={`flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-md border transition-colors ${
+        className={`flex items-center gap-2 w-full text-left rounded-lg px-2.5 py-2 text-xs transition-all duration-150 border ${
           dropdownOpen
-            ? "border-cyan-500/60 text-cyan-300 bg-cyan-400/10"
-            : "border-rim text-slate-300 hover:text-slate-100 hover:border-rim-bright"
+            ? "bg-cyan-400/10 text-cyan-300 border-cyan-400/40"
+            : "bg-cyan-400/10 text-cyan-400 border-cyan-400/30"
         }`}
       >
-        <span aria-hidden="true">📅</span>
-        <span>Date Filter</span>
-        <span className="text-slate-500">·</span>
-        <span className="text-cyan-300/80">{activeLabel}</span>
-        <span className="text-[8px] text-slate-500">{dropdownOpen ? "▲" : "▼"}</span>
+        <span className="text-sm leading-none w-4 text-center shrink-0" aria-hidden="true">📅</span>
+        <span className="font-medium truncate flex-1">{activeLabel}</span>
+        <span className="text-[9px] text-slate-500 shrink-0">{dropdownOpen ? "▲" : "▼"}</span>
       </button>
 
       {dropdown}
-    </div>
+    </>
   );
 }

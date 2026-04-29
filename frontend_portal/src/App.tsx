@@ -4,9 +4,10 @@ import { Sidebar } from "./components/Sidebar";
 import { NewsGrid } from "./components/NewsGrid";
 import { WorldMap } from "./components/WorldMap";
 import { GlobeErrorBoundary } from "./components/visualizer/GlobeErrorBoundary";
-import { GlobeControls, type DateRange } from "./components/GlobeControls";
+import { type DateRange } from "./components/GlobeControls";
 import { BreakingNewsCarousel } from "./components/BreakingNewsCarousel";
 import { ApiDocsPage } from "./components/ApiDocsPage";
+import { AuthButton } from "./components/AuthButton";
 import { useNews } from "./hooks/useNews";
 
 // Lazy-load the heavy R3F bundle so it doesn't block the initial paint
@@ -201,8 +202,10 @@ function FeedView() {
         <Sidebar
           selectedCategories={categories}
           selectedRegion={regionCode}
+          dateRange={dateRange}
           onCategoriesChange={handleCategoriesChange}
           onRegionSelect={handleRegionSelect}
+          onDateRangeChange={(r) => { setDateRange(r); setOffset(0); }}
         />
       </nav>
 
@@ -262,7 +265,7 @@ function FeedView() {
             )}
           </div>
 
-          {/* View toggle + time controls + live indicator */}
+          {/* View toggle + live indicator (date filter lives in the sidebar) */}
           <div className="ml-auto flex items-center gap-3">
             {/* API docs link */}
             <Link
@@ -272,9 +275,6 @@ function FeedView() {
             >
               {"</> API"}
             </Link>
-
-            {/* Time-range selector */}
-            <GlobeControls value={dateRange} onChange={(r) => { setDateRange(r); setOffset(0); }} />
 
             <button
               onClick={() => setGlobeOpen((p) => !p)}
@@ -287,10 +287,9 @@ function FeedView() {
             >
               🌐 {globeOpen ? "Globe on" : "Globe off"}
             </button>
-            <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-mono">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse_slow" aria-hidden="true" />
-              LIVE · 5m
-            </div>
+
+            {/* Auth control — Log in pill when logged out, profile circle when logged in */}
+            <AuthButton />
           </div>
         </header>
 
