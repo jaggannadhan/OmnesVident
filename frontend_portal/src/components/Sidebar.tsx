@@ -45,11 +45,19 @@ export function Sidebar({
     <aside className="flex flex-col gap-6 h-full overflow-y-auto py-4 px-3">
 
       {/* Logo */}
-      <div className="flex flex-col gap-0.5 px-1 pb-2 border-b border-rim">
-        <h1 className="text-base font-bold tracking-tight text-white">
-          Omnes<span className="text-cyan-400">Vident</span>
-        </h1>
-        <p className="text-[10px] text-slate-600 font-mono">Global News Discovery</p>
+      <div className="flex items-center gap-2.5 px-1 pb-2 border-b border-rim">
+        <img
+          src="/logo-square.png"
+          alt=""
+          aria-hidden="true"
+          className="w-10 h-10 shrink-0 object-contain"
+        />
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <h1 className="text-base font-bold tracking-tight text-white">
+            Omnes<span className="text-cyan-400">Vident</span>
+          </h1>
+          <p className="text-[10px] text-slate-600 font-mono truncate">Global News Discovery</p>
+        </div>
       </div>
 
       {/* Active filters summary */}

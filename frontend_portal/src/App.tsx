@@ -240,6 +240,14 @@ function FeedView() {
             <MenuIcon open={sidebarOpen} />
           </button>
 
+          {/* Brand mark */}
+          <img
+            src="/logo-icon.png"
+            alt=""
+            aria-hidden="true"
+            className="w-7 h-7 shrink-0"
+          />
+
           {/* Breadcrumb */}
           <div className="flex items-center gap-2 text-sm min-w-0">
             <span className="text-slate-500">Feed</span>
