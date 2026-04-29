@@ -239,7 +239,10 @@ export function GlobeScene({ region, categories, startDate, endDate }: GlobeScen
       </div>
 
       <Canvas
-        camera={{ position: [0, 0, 5.5], fov: 45, near: 0.1, far: 100 }}
+        // Initial camera distance pulled back so the globe renders at ~70%
+        // of its previous on-screen size. Apparent size ≈ radius / distance,
+        // so 5.5 / 0.7 ≈ 7.86. User can still zoom in (min 3) or out (max 9).
+        camera={{ position: [0, 0, 7.86], fov: 45, near: 0.1, far: 100 }}
         gl={{ antialias: true, alpha: false }}
         style={{ background: "#02030a" }}
       >

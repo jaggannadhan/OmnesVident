@@ -36,17 +36,26 @@ export function AuthButton() {
     };
   }, [menuOpen]);
 
-  // ─── Logged out: Login button ──────────────────────────────────────────────
+  // ─── Logged out: stacked Log-in + Sign-up pills ────────────────────────────
   if (!user) {
     return (
       <>
-        <button
-          onClick={() => setLoginOpen(true)}
-          className="text-[10px] font-semibold uppercase tracking-widest px-2.5 py-1 rounded-md border border-cyan-500/40 text-cyan-300 hover:text-cyan-200 hover:bg-cyan-400/10 transition-colors"
-          aria-label="Log in"
-        >
-          Log in
-        </button>
+        <div className="flex flex-col gap-1 items-stretch shrink-0">
+          <button
+            onClick={() => setLoginOpen(true)}
+            className="text-[10px] font-semibold uppercase tracking-widest px-2.5 py-1 rounded-md border border-cyan-500/40 text-cyan-300 hover:text-cyan-200 hover:bg-cyan-400/10 transition-colors"
+            aria-label="Log in"
+          >
+            Log in
+          </button>
+          <button
+            onClick={() => setSignupOpen(true)}
+            className="text-[10px] font-semibold uppercase tracking-widest px-2.5 py-1 rounded-md border border-violet-500/40 text-violet-300 hover:text-violet-200 hover:bg-violet-400/10 transition-colors"
+            aria-label="Sign up"
+          >
+            Sign up
+          </button>
+        </div>
 
         <LoginModal
           open={loginOpen}
