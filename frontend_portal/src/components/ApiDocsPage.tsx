@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SignupModal } from "./SignupModal";
+import { LoginModal } from "./LoginModal";
+import { AuthButton } from "./AuthButton";
 import { useAuth } from "../hooks/useAuth";
 
 const API_BASE_PUBLIC =
@@ -424,6 +426,7 @@ curl -H "x-api-key: $OV_KEY" \\
 
 export function ApiDocsPage() {
   const { user, regenerateKey } = useAuth();
+  const [loginOpen,   setLoginOpen]   = useState(false);
   const [signupOpen,  setSignupOpen]  = useState(false);
   const [issued,      setIssued]      = useState<IssuedKey | null>(null);
   const [activeIdx,   setActiveIdx]   = useState<number | null>(null);
@@ -469,13 +472,17 @@ export function ApiDocsPage() {
       <div style={{ maxWidth: "920px", margin: "0 auto" }}>
 
         {/* Top nav */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "24px" }}>
           <Link to="/" style={{ fontSize: "11px", color: "#94a3b8", textDecoration: "none", letterSpacing: "0.08em", textTransform: "uppercase" }}>
             ← Back to globe
           </Link>
-          <span style={{ fontSize: "10px", color: "#475569", fontFamily: "monospace", letterSpacing: "0.1em" }}>
-            v1 · public REST API
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ fontSize: "10px", color: "#475569", fontFamily: "monospace", letterSpacing: "0.1em" }}>
+              v1 · public REST API
+            </span>
+            {/* Auth control — Log in pill (logged out) or profile circle (logged in) */}
+            <AuthButton />
+          </div>
         </div>
 
         {/* Hero */}
@@ -509,7 +516,7 @@ export function ApiDocsPage() {
               </button>
             ) : (
               <button
-                onClick={() => setSignupOpen(true)}
+                onClick={() => setLoginOpen(true)}
                 style={{
                   padding: "10px 18px",
                   fontSize: "12px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
@@ -593,10 +600,16 @@ export function ApiDocsPage() {
 
       </div>
 
+      <LoginModal
+        open={loginOpen}
+        onClose={() => setLoginOpen(false)}
+        onSwitchToSignup={() => setSignupOpen(true)}
+      />
       <SignupModal
         open={signupOpen}
         onClose={() => setSignupOpen(false)}
         onSuccess={onSignupSuccess}
+        onSwitchToLogin={() => setLoginOpen(true)}
       />
       {issued && <KeyReveal issued={issued} onClose={() => setIssued(null)} />}
       {activeIdx !== null && (
