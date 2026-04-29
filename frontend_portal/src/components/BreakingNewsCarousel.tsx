@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { StoryOut } from "../services/api";
+import { regionLabel } from "../utils/regionLabels";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -258,8 +259,11 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
           >
             {story.category}
           </span>
-          <span style={{ fontSize: "8px", fontFamily: "monospace", color: "#64748b", fontWeight: 600 }}>
-            {story.region_code}
+          <span
+            style={{ fontSize: "8px", color: "#64748b", fontWeight: 600 }}
+            title={story.region_code}
+          >
+            {regionLabel(story.region_code)}
           </span>
           <span style={{ fontSize: "8px", color: "#334155", fontFamily: "monospace" }}>
             {relativeTime(story.timestamp)}

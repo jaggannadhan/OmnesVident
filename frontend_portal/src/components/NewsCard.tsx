@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { StoryOut } from "../services/api";
+import { regionLabel } from "../utils/regionLabels";
 
 // ---------------------------------------------------------------------------
 // Shared helpers & constants
@@ -110,10 +111,10 @@ export function NewsCard({ story, onCategoryClick, onRegionClick }: NewsCardProp
         {/* Primary region badge */}
         <button
           onClick={() => onRegionClick?.(story.region_code)}
-          className="inline-flex items-center text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded ring-1 bg-slate-700/40 ring-slate-600/40 text-slate-300 hover:bg-slate-600/40 transition-colors"
-          title={`View ${story.region_code} news`}
+          className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded ring-1 bg-slate-700/40 ring-slate-600/40 text-slate-300 hover:bg-slate-600/40 transition-colors"
+          title={`View ${regionLabel(story.region_code)} news`}
         >
-          {story.region_code}
+          {regionLabel(story.region_code)}
         </button>
 
         {/* Cross-regional tags (beyond primary) */}
@@ -124,10 +125,10 @@ export function NewsCard({ story, onCategoryClick, onRegionClick }: NewsCardProp
             <button
               key={r}
               onClick={() => onRegionClick?.(r)}
-              className="inline-flex items-center text-[10px] font-mono px-1.5 py-0.5 rounded ring-1 bg-slate-800/40 ring-slate-700/30 text-slate-500 hover:text-slate-300 hover:bg-slate-700/40 transition-colors"
-              title={`Also relevant to ${r}`}
+              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded ring-1 bg-slate-800/40 ring-slate-700/30 text-slate-500 hover:text-slate-300 hover:bg-slate-700/40 transition-colors"
+              title={`Also relevant to ${regionLabel(r)}`}
             >
-              {r}
+              {regionLabel(r)}
             </button>
           ))}
 

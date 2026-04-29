@@ -54,6 +54,19 @@ html.light {
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-rim-bright;
   }
+
+  /* Make the native calendar / clock pickers legible on the dark theme.
+     The browser-supplied glyph is dark by default; invert it so it reads
+     against our deep-navy inputs. Light theme keeps the default. */
+  html.dark input[type="date"]::-webkit-calendar-picker-indicator,
+  html.dark input[type="time"]::-webkit-calendar-picker-indicator,
+  html.dark input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+  html.dark input[type="month"]::-webkit-calendar-picker-indicator,
+  html.dark input[type="week"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    opacity: 0.85;
+    cursor: pointer;
+  }
 }
 
 @layer utilities {
