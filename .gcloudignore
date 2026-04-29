@@ -1,0 +1,44 @@
+# .gcloudignore — controls what `gcloud run deploy --source .` uploads.
+#
+# Without this file, gcloud falls back to .gitignore patterns, which means
+# the entire frontend_portal/ tree (including its package.json) gets uploaded,
+# and Cloud Build's buildpack detector picks Node.js instead of using our
+# root Dockerfile. Excluding the frontend keeps the buildpack from triggering.
+
+# Frontend — Vercel-deployed; never built into the API container
+frontend_portal/
+
+# Local dev / virtualenv
+.venv/
+.env
+*.env
+
+# Python build artefacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local SQLite + ephemeral state
+*.db
+*.sqlite
+*.sqlite3
+ingestion_engine/core/budget_state.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git metadata + CI configs (Dockerfile reads from build context, not the repo)
+.git/
+.github/
+.gitignore

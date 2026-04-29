@@ -29,12 +29,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from api_storage.api_users import (
     create_user,
+    get_user_by_email,
     get_user_by_key_hash,
     hash_api_key,
+    has_unlimited_access,
+    rotate_api_key,
     verify_credentials,
 )
 from api_storage.login_throttle import (
@@ -44,6 +47,7 @@ from api_storage.login_throttle import (
 )
 from api_storage.rate_limiter import limiter
 from api_storage.schemas import PaginatedStoriesResponse, StoryOut
+from api_storage import session_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +70,10 @@ _CATEGORIES: List[Dict[str, str]] = [
 # ─── Auth & rate-limit dependency ────────────────────────────────────────────
 
 class _AuthedUser(BaseModel):
-    user_id:       str
-    name:          str
-    email:         str
-    access_level:  str
+    user_id:        str
+    name:           str
+    email:          str
+    access_levels:  List[str]
     api_key_prefix: str
     rate_limit_per_min: Optional[int] = None
 
@@ -93,12 +97,13 @@ async def auth_required(
             detail="Invalid or revoked API key.",
         )
 
-    is_super = user.get("access_level") == "super-user"
+    levels = user.get("access_levels") or []
+    is_unlimited = has_unlimited_access(levels)
     user_rate = user.get("rate_limit_per_min")
     allowed = limiter.acquire(
         key=key_hash,
         rate_per_min=user_rate,
-        unlimited=is_super,
+        unlimited=is_unlimited,
     )
     if not allowed:
         retry = limiter.retry_after_seconds(key_hash)
@@ -112,7 +117,7 @@ async def auth_required(
         user_id=user["user_id"],
         name=user["name"],
         email=user["email"],
-        access_level=user["access_level"],
+        access_levels=list(levels),
         api_key_prefix=user["api_key_prefix"],
         rate_limit_per_min=user_rate,
     )
@@ -126,18 +131,36 @@ class SignupRequest(BaseModel):
     password: str = Field(..., min_length=8, max_length=128,
                           description="Stored as a bcrypt hash; never persisted in plaintext.")
 
+    @field_validator("password")
+    @classmethod
+    def _password_complexity(cls, v: str) -> str:
+        """Defense-in-depth: enforce the same rules the UI shows users."""
+        if not re.search(r"[A-Z]",     v):
+            raise ValueError("Password must contain at least one uppercase letter.")
+        if not re.search(r"[a-z]",     v):
+            raise ValueError("Password must contain at least one lowercase letter.")
+        if not re.search(r"\d",        v):
+            raise ValueError("Password must contain at least one number.")
+        if not re.search(r"[^A-Za-z0-9]", v):
+            raise ValueError("Password must contain at least one special character.")
+        return v
+
 
 class SignupResponse(BaseModel):
     user_id:        str
     name:           str
     email:          str
-    access_level:   str
+    access_levels:  List[str]
     api_key:        str = Field(..., description="Save this — it is shown ONCE.")
     api_key_prefix: str
     rate_limit_per_min: Optional[int]
+    session_token:  Optional[str] = Field(
+        None,
+        description="Bearer token for user-action endpoints (regenerate-key, etc.)."
+    )
     notice: str = (
         "This API key is shown only once. Store it in a secret manager. "
-        "If you lose it, sign up again with a different email — keys cannot be recovered."
+        "If you lose it, log in and click 'Regenerate API key'."
     )
 
 
@@ -150,24 +173,42 @@ class LoginResponse(BaseModel):
     user_id:        str
     name:           str
     email:          str
-    access_level:   str
+    access_levels:  List[str]
     api_key_prefix: str
     rate_limit_per_min: Optional[int]
+    session_token:  Optional[str] = Field(
+        None,
+        description="Bearer token for user-action endpoints (regenerate-key, etc.)."
+    )
+
+
+class RegenerateKeyResponse(BaseModel):
+    user_id:        str
+    email:          str
+    api_key:        str = Field(..., description="The freshly minted key. Shown ONCE.")
+    api_key_prefix: str
+    notice: str = (
+        "Your previous API key has been invalidated. Save this new key now — "
+        "we cannot retrieve it later."
+    )
 
 
 # ─── Routes — auth ───────────────────────────────────────────────────────────
 
 @router.post("/auth/signup", response_model=SignupResponse, status_code=201)
 async def signup(req: SignupRequest):
-    """Create a community-tier user and return a fresh API key (one time only).
+    """Create a basic-tier user and return a fresh API key (one time only).
     Stores the password as a bcrypt hash so the user can later authenticate via
-    /v1/auth/login without us ever seeing the raw password again."""
+    /v1/auth/login without us ever seeing the raw password again.
+
+    All public signups land at access_levels=['basic']. Premium / super_user /
+    admin promotions happen out-of-band (admin script or admin endpoint)."""
     try:
         user = await create_user(
             name=req.name,
             email=str(req.email),
             password=req.password,
-            access_level="community",
+            access_levels=["basic"],
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -179,10 +220,11 @@ async def signup(req: SignupRequest):
         user_id=user["user_id"],
         name=user["name"],
         email=user["email"],
-        access_level=user["access_level"],
+        access_levels=user["access_levels"],
         api_key=user["api_key"],
         api_key_prefix=user["api_key_prefix"],
         rate_limit_per_min=user.get("rate_limit_per_min"),
+        session_token=session_tokens.issue(user["user_id"], user["email"]),
     )
 
 
@@ -225,9 +267,60 @@ async def login(req: LoginRequest):
         user_id=user["user_id"],
         name=user["name"],
         email=user["email"],
-        access_level=user["access_level"],
+        access_levels=user.get("access_levels") or ["basic"],
         api_key_prefix=user["api_key_prefix"],
         rate_limit_per_min=user.get("rate_limit_per_min"),
+        session_token=session_tokens.issue(user["user_id"], user["email"]),
+    )
+
+
+@router.post("/auth/regenerate-key", response_model=RegenerateKeyResponse)
+async def regenerate_key(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """
+    Issue a new API key for the calling user, invalidating the previous one.
+
+    Authentication: `Authorization: Bearer <session_token>`. The session token
+    is the value the frontend received from `/v1/auth/login` or
+    `/v1/auth/signup`. We deliberately do NOT accept x-api-key here — if your
+    key is compromised, you'd want to be able to rotate it without sending
+    the compromised key.
+
+    The new raw key is returned in the body. Store it; we cannot recover it.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization: Bearer <session_token>.",
+        )
+    token = authorization.split(" ", 1)[1].strip()
+    payload = session_tokens.verify(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired or invalid. Please log in again.",
+        )
+
+    user = await get_user_by_email(payload["email"])
+    if not user or user.get("user_id") != payload["uid"] or user.get("revoked"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account no longer accessible.",
+        )
+
+    rotated = await rotate_api_key(payload["email"])
+    if not rotated:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not rotate key — try again shortly.",
+        )
+
+    return RegenerateKeyResponse(
+        user_id=rotated["user_id"],
+        email=rotated["email"],
+        api_key=rotated["api_key"],
+        api_key_prefix=rotated["api_key_prefix"],
     )
 
 

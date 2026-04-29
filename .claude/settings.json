@@ -20,7 +20,10 @@
       "Bash(/Users/jv/Documents/MyProjects/OmnesVident/.venv/bin/python -c \"import bcrypt; print\\('bcrypt', bcrypt.__version__\\)\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('signup keys:', list\\(d.keys\\(\\)\\)\\)\")",
       "Bash(FIRESTORE_PROJECT=omnesvident /Users/jv/Documents/MyProjects/OmnesVident/.venv/bin/python)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('api_storage/public_api.py'\\).read\\(\\)\\); print\\('OK public_api.py'\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f'access_levels: {d.get\\(\\\\\"access_levels\\\\\"\\)}'\\); print\\(f'tier: {\\\\\"unlimited\\\\\" if d.get\\(\\\\\"rate_limit_per_min\\\\\"\\)==0 else \\\\\"basic\\\\\"}'\\)\")",
+      "Bash(gcloud builds *)"
     ]
   }
 }

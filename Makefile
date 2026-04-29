@@ -117,17 +117,19 @@ refine-all:
 		-H "Content-Type: application/json" | python3 -m json.tool
 	@echo "✓ Refinement queued (runs in background on Cloud Run)."
 
-# Provision a super-user in the public-API api_users collection.
-#   make create-super-user NAME="Jagan" EMAIL="jegsirox@gmail.com" PASSWORD="…"
+# Provision (or update) a privileged api_users record.
+#   make create-super-user NAME="Jagan" EMAIL="jegsirox@gmail.com" PASSWORD="…" LEVELS="super_user,admin"
 # Add ROTATE=1 to force a brand-new API key for an existing email.
 # PASSWORD is hashed with bcrypt before storage; required for /v1/auth/login.
+# LEVELS defaults to "super_user,admin" when omitted.
 create-super-user:
 	@if [ -z "$(NAME)" ] || [ -z "$(EMAIL)" ]; then \
-		echo "Usage: make create-super-user NAME=\"Full Name\" EMAIL=\"you@example.com\" [PASSWORD=\"…\"] [ROTATE=1]"; \
+		echo "Usage: make create-super-user NAME=\"Full Name\" EMAIL=\"you@example.com\" [PASSWORD=\"…\"] [LEVELS=\"super_user,admin\"] [ROTATE=1]"; \
 		exit 1; \
 	fi
 	@FIRESTORE_PROJECT=omnesvident $(PYTHON) -m intelligence_layer.scripts.create_super_user \
 		--name "$(NAME)" --email "$(EMAIL)" \
+		$(if $(LEVELS),--levels "$(LEVELS)",) \
 		$(if $(PASSWORD),--password "$(PASSWORD)",) \
 		$(if $(ROTATE),--rotate,)
 
