@@ -54,6 +54,11 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // Live password-match status — used both for the inline hint under the
+  // confirm input and to disable the submit button until they match.
+  const pwMismatch = pw2.length > 0 && pw !== pw2;
+  const pwMatched  = pw2.length > 0 && pw === pw2 && pw.length >= PASSWORD_MIN;
+
   if (!open) return null;
 
   async function submit(e: React.FormEvent) {
@@ -185,15 +190,49 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
               type="password" value={pw2} required minLength={PASSWORD_MIN} maxLength={128}
               autoComplete="new-password"
               onChange={(e) => setPw2(e.target.value)}
+              aria-invalid={pwMismatch || undefined}
+              aria-describedby={pwMismatch ? "pw-mismatch" : undefined}
               style={{
                 ...inputBaseStyle,
                 borderColor:
                   pw2.length === 0          ? "rgba(148,163,184,0.18)"
-                  : pw === pw2              ? "rgba(74,222,128,0.4)"
+                  : pwMatched               ? "rgba(74,222,128,0.4)"
                   :                            "rgba(239,68,68,0.4)",
               }}
               onFocus={focusOn} onBlur={blurOn}
             />
+            {/* Live mismatch hint — appears as soon as the user types a
+                non-matching character in the confirm field. */}
+            {pwMismatch && (
+              <span
+                id="pw-mismatch"
+                role="alert"
+                style={{
+                  marginTop: "2px",
+                  fontSize: "10px",
+                  color: "#fca5a5",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                }}
+              >
+                <span aria-hidden="true">✕</span> Passwords do not match
+              </span>
+            )}
+            {pwMatched && (
+              <span
+                style={{
+                  marginTop: "2px",
+                  fontSize: "10px",
+                  color: "#86efac",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                }}
+              >
+                <span aria-hidden="true">✓</span> Passwords match
+              </span>
+            )}
           </label>
 
           {error && (
@@ -203,18 +242,18 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
           )}
 
           <button
-            type="submit" disabled={loading}
+            type="submit" disabled={loading || pwMismatch}
             style={{
               marginTop: "4px", padding: "10px 14px",
               fontSize: "12px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
-              background: loading ? "rgba(167,139,250,0.4)" : "#a78bfa",
+              background: (loading || pwMismatch) ? "rgba(167,139,250,0.4)" : "#a78bfa",
               color: "#0f0f23", border: "none", borderRadius: "8px",
-              cursor: loading ? "wait" : "pointer",
-              boxShadow: loading ? "none" : "0 0 16px rgba(167,139,250,0.35)",
+              cursor: (loading || pwMismatch) ? "not-allowed" : "pointer",
+              boxShadow: (loading || pwMismatch) ? "none" : "0 0 16px rgba(167,139,250,0.35)",
               transition: "background 0.15s ease, box-shadow 0.15s ease",
             }}
           >
-            {loading ? "Generating key…" : "Generate API key"}
+            {loading ? "Signing up…" : "Sign up"}
           </button>
         </form>
 
