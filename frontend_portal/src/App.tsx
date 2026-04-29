@@ -191,7 +191,7 @@ function FeedView() {
 
       <nav
         className={`
-          fixed top-0 left-0 z-50 h-full bg-surface border-r border-rim
+          fixed top-0 left-0 z-50 h-full bg-[#161a1d] border-r border-rim
           transform transition-all duration-200 ease-out overflow-hidden
           lg:relative lg:translate-x-0 lg:flex lg:flex-col lg:shrink-0
           ${sidebarOpen ? "translate-x-0 w-64" : "-translate-x-full w-64"}
@@ -239,14 +239,6 @@ function FeedView() {
           >
             <MenuIcon open={sidebarOpen} />
           </button>
-
-          {/* Brand mark */}
-          <img
-            src="/logo-icon.png"
-            alt=""
-            aria-hidden="true"
-            className="w-7 h-7 shrink-0"
-          />
 
           {/* Breadcrumb */}
           <div className="flex items-center gap-2 text-sm min-w-0">
