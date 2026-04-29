@@ -118,15 +118,18 @@ refine-all:
 	@echo "✓ Refinement queued (runs in background on Cloud Run)."
 
 # Provision a super-user in the public-API api_users collection.
-#   make create-super-user NAME="Jagan" EMAIL="jegsirox@gmail.com"
-# Add ROTATE=1 to force a brand-new key for an existing email.
+#   make create-super-user NAME="Jagan" EMAIL="jegsirox@gmail.com" PASSWORD="…"
+# Add ROTATE=1 to force a brand-new API key for an existing email.
+# PASSWORD is hashed with bcrypt before storage; required for /v1/auth/login.
 create-super-user:
 	@if [ -z "$(NAME)" ] || [ -z "$(EMAIL)" ]; then \
-		echo "Usage: make create-super-user NAME=\"Full Name\" EMAIL=\"you@example.com\" [ROTATE=1]"; \
+		echo "Usage: make create-super-user NAME=\"Full Name\" EMAIL=\"you@example.com\" [PASSWORD=\"…\"] [ROTATE=1]"; \
 		exit 1; \
 	fi
 	@FIRESTORE_PROJECT=omnesvident $(PYTHON) -m intelligence_layer.scripts.create_super_user \
-		--name "$(NAME)" --email "$(EMAIL)" $(if $(ROTATE),--rotate,)
+		--name "$(NAME)" --email "$(EMAIL)" \
+		$(if $(PASSWORD),--password "$(PASSWORD)",) \
+		$(if $(ROTATE),--rotate,)
 
 # ─────────────────────────────────────────────
 # Test

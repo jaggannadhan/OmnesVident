@@ -56,6 +56,32 @@ def hash_api_key(raw_key: str) -> str:
     return hashlib.sha256(raw_key.encode()).hexdigest()
 
 
+# ─── Password hashing (bcrypt) ───────────────────────────────────────────────
+# bcrypt is the industry standard for password storage:
+#   * incorporates a per-password salt,
+#   * intentionally slow (cost factor) to defeat brute-force,
+#   * upgrade path via cost-factor bumps.
+# We never store raw passwords. Login compares the supplied password against
+# the stored hash with bcrypt.checkpw.
+
+_BCRYPT_ROUNDS = 12   # ~250ms per check on modern hardware; safe & fast enough
+
+def hash_password(plain: str) -> str:
+    import bcrypt  # type: ignore
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode("utf-8")
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    if not plain or not hashed:
+        return False
+    try:
+        import bcrypt  # type: ignore
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception as exc:
+        logger.warning("verify_password: bcrypt check failed — %s", exc)
+        return False
+
+
 # ─── Firestore client (lazy singleton) ───────────────────────────────────────
 
 _client = None
@@ -123,11 +149,16 @@ async def create_user(
     *,
     name: str,
     email: str,
+    password: Optional[str] = None,
     access_level: str = "community",
     rate_limit_per_min: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Create a user with a freshly minted API key.
+
+    `password` is hashed with bcrypt before storage (we never persist the raw
+    value).  When omitted (e.g. legacy admin scripts), the user can still
+    authenticate via x-api-key but cannot login via /v1/auth/login.
 
     Returns: { user_id, name, email, access_level, api_key (raw — only time
               we ever return this), api_key_prefix, created_at }
@@ -153,6 +184,7 @@ async def create_user(
         "access_level":       access_level,
         "api_key_prefix":     raw_key[:12],
         "api_key_hash":       key_hash,
+        "password_hash":      hash_password(password) if password else None,
         "created_at":         now,
         "revoked":            False,
         "rate_limit_per_min": rate_limit_per_min,
@@ -160,8 +192,8 @@ async def create_user(
 
     await client.collection(_USERS_COLLECTION).document(key_hash).set(record)
     _CACHE[key_hash] = record
-    logger.info("api_users: created %s (level=%s) — key prefix=%s",
-                email, access_level, raw_key[:12])
+    logger.info("api_users: created %s (level=%s, password=%s) — key prefix=%s",
+                email, access_level, "set" if password else "none", raw_key[:12])
 
     return {**record, "api_key": raw_key}
 
@@ -181,6 +213,38 @@ async def upgrade_to_super_user(email: str) -> bool:
     })
     _CACHE.pop(key_hash, None)  # invalidate cached copy
     return True
+
+
+async def set_password(email: str, password: str) -> bool:
+    """Set or rotate the bcrypt password_hash for an existing user."""
+    client = _get_client()
+    if client is None:
+        return False
+    user = await get_user_by_email(email)
+    if not user:
+        return False
+    key_hash = user["api_key_hash"]
+    await client.collection(_USERS_COLLECTION).document(key_hash).update({
+        "password_hash": hash_password(password),
+    })
+    _CACHE.pop(key_hash, None)
+    return True
+
+
+async def verify_credentials(email: str, password: str) -> Optional[Dict[str, Any]]:
+    """
+    Look up a user by email and verify their password.
+    Returns the (cache-fresh) user record on match, else None.
+    """
+    user = await get_user_by_email(email)
+    if not user or user.get("revoked"):
+        return None
+    pw_hash = user.get("password_hash")
+    if not pw_hash:
+        return None  # user has no password set → cannot login
+    if not verify_password(password, pw_hash):
+        return None
+    return user
 
 
 def invalidate_cache(key_hash: Optional[str] = None) -> None:

@@ -30,10 +30,16 @@ from api_storage import api_users  # noqa: E402
 async def main() -> int:
     parser = argparse.ArgumentParser(description="Create or upgrade a super-user.")
     parser.add_argument("--name",  required=True, help="Display name")
-    parser.add_argument("--email", required=True, help="Email (also the login key)")
+    parser.add_argument("--email", required=True, help="Email (login identifier)")
+    parser.add_argument(
+        "--password",
+        help="Optional password (bcrypt-hashed before storage). "
+             "Required for /v1/auth/login.  If the user already exists, this "
+             "rotates the password without issuing a new API key.",
+    )
     parser.add_argument(
         "--rotate", action="store_true",
-        help="If user exists, delete and recreate so a fresh key is issued.",
+        help="If user exists, delete and recreate so a fresh API key is issued.",
     )
     args = parser.parse_args()
 
@@ -55,8 +61,11 @@ async def main() -> int:
             ok = await api_users.upgrade_to_super_user(args.email)
             print(f"\n→ Upgraded to super-user: {ok}")
         else:
-            print("\n→ Already a super-user. No changes.")
-        print("\n(Pass --rotate to delete and recreate with a fresh key.)")
+            print("\n→ Already a super-user.")
+        if args.password:
+            ok = await api_users.set_password(args.email, args.password)
+            print(f"→ Password set/rotated: {ok}")
+        print("\n(Pass --rotate to delete and recreate with a fresh API key.)")
         return 0
 
     if existing and args.rotate:
@@ -70,6 +79,7 @@ async def main() -> int:
     user = await api_users.create_user(
         name=args.name,
         email=args.email,
+        password=args.password,
         access_level="super-user",
         rate_limit_per_min=0,   # 0 = unlimited
     )

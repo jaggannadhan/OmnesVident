@@ -15,7 +15,12 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f\\\\\"count: {d['count']}\\\\\"\\); print\\(f\\\\\"first 3: {[r['code'] for r in d['regions'][:3]]}\\\\\"\\)\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('community-tier key created:', d.get\\('api_key_prefix','...'\\) if 'api_key' in d else d\\)\")",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(/Users/jv/Documents/MyProjects/OmnesVident/.venv/bin/pip install *)",
+      "Bash(/Users/jv/Documents/MyProjects/OmnesVident/.venv/bin/python -c \"import bcrypt; print\\('bcrypt', bcrypt.__version__\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('signup keys:', list\\(d.keys\\(\\)\\)\\)\")",
+      "Bash(FIRESTORE_PROJECT=omnesvident /Users/jv/Documents/MyProjects/OmnesVident/.venv/bin/python)",
+      "Bash(git push *)"
     ]
   }
 }

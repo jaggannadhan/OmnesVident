@@ -35,6 +35,12 @@ from api_storage.api_users import (
     create_user,
     get_user_by_key_hash,
     hash_api_key,
+    verify_credentials,
+)
+from api_storage.login_throttle import (
+    check_login_allowed,
+    record_failure as record_login_failure,
+    record_success as record_login_success,
 )
 from api_storage.rate_limiter import limiter
 from api_storage.schemas import PaginatedStoriesResponse, StoryOut
@@ -115,8 +121,10 @@ async def auth_required(
 # ─── Schemas — signup ────────────────────────────────────────────────────────
 
 class SignupRequest(BaseModel):
-    name:  str = Field(..., min_length=2, max_length=80)
-    email: EmailStr
+    name:     str = Field(..., min_length=2, max_length=80)
+    email:    EmailStr
+    password: str = Field(..., min_length=8, max_length=128,
+                          description="Stored as a bcrypt hash; never persisted in plaintext.")
 
 
 class SignupResponse(BaseModel):
@@ -133,13 +141,34 @@ class SignupResponse(BaseModel):
     )
 
 
+class LoginRequest(BaseModel):
+    email:    EmailStr
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class LoginResponse(BaseModel):
+    user_id:        str
+    name:           str
+    email:          str
+    access_level:   str
+    api_key_prefix: str
+    rate_limit_per_min: Optional[int]
+
+
 # ─── Routes — auth ───────────────────────────────────────────────────────────
 
 @router.post("/auth/signup", response_model=SignupResponse, status_code=201)
 async def signup(req: SignupRequest):
-    """Create a community-tier user and return a fresh API key (one time only)."""
+    """Create a community-tier user and return a fresh API key (one time only).
+    Stores the password as a bcrypt hash so the user can later authenticate via
+    /v1/auth/login without us ever seeing the raw password again."""
     try:
-        user = await create_user(name=req.name, email=str(req.email), access_level="community")
+        user = await create_user(
+            name=req.name,
+            email=str(req.email),
+            password=req.password,
+            access_level="community",
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except RuntimeError as exc:
@@ -152,6 +181,51 @@ async def signup(req: SignupRequest):
         email=user["email"],
         access_level=user["access_level"],
         api_key=user["api_key"],
+        api_key_prefix=user["api_key_prefix"],
+        rate_limit_per_min=user.get("rate_limit_per_min"),
+    )
+
+
+@router.post("/auth/login", response_model=LoginResponse)
+async def login(req: LoginRequest):
+    """Verify email + password (bcrypt) and return user metadata.
+
+    For privacy reasons we deliberately do NOT return the raw API key — keys
+    are stored as a SHA-256 hash and cannot be recovered. The frontend uses
+    this to populate the UI with the logged-in user's identity; programmatic
+    API calls still require the raw key the user saved at signup time.
+
+    Returns 401 with a generic message regardless of whether the email exists,
+    so an attacker cannot enumerate valid emails.
+
+    Per-email failed-login throttling kicks in after 5 strikes in 15 min,
+    returning 429 with a `Retry-After` header. We throttle based on the email
+    we received — including emails that don't exist — so 429 responses cannot
+    be used to enumerate registered accounts.
+    """
+    email_lc = str(req.email).strip().lower()
+
+    # Throttle BEFORE we even attempt the bcrypt check — bcrypt is slow on
+    # purpose, and we don't want an attacker to use it as an oracle.
+    retry_after = check_login_allowed(email_lc)
+    if retry_after > 0:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed login attempts. Try again in {retry_after}s.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    user = await verify_credentials(email_lc, req.password)
+    if not user:
+        record_login_failure(email_lc)
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    record_login_success(email_lc)
+    return LoginResponse(
+        user_id=user["user_id"],
+        name=user["name"],
+        email=user["email"],
+        access_level=user["access_level"],
         api_key_prefix=user["api_key_prefix"],
         rate_limit_per_min=user.get("rate_limit_per_min"),
     )
