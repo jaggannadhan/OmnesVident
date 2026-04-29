@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SignupModal } from "./SignupModal";
+import { useAuth } from "../hooks/useAuth";
 
 const API_BASE_PUBLIC =
   ((import.meta.env.VITE_API_BASE_URL as string | undefined) ??
@@ -422,13 +423,37 @@ curl -H "x-api-key: $OV_KEY" \\
 ];
 
 export function ApiDocsPage() {
-  const [signupOpen, setSignupOpen] = useState(false);
-  const [issued,     setIssued]     = useState<IssuedKey | null>(null);
-  const [activeIdx,  setActiveIdx]  = useState<number | null>(null);
+  const { user, regenerateKey } = useAuth();
+  const [signupOpen,  setSignupOpen]  = useState(false);
+  const [issued,      setIssued]      = useState<IssuedKey | null>(null);
+  const [activeIdx,   setActiveIdx]   = useState<number | null>(null);
+  const [regenLoading, setRegenLoading] = useState(false);
+  const [regenError,   setRegenError]   = useState<string | null>(null);
 
   const onSignupSuccess = (apiKey: string, email: string, name: string) => {
     setSignupOpen(false);
     setIssued({ apiKey, email, name });
+  };
+
+  // Regenerate flow: confirm, call /v1/auth/regenerate-key, reveal new key.
+  const onRegenerate = async () => {
+    if (!user || regenLoading) return;
+    const ok = window.confirm(
+      "Generate a new API key?\n\n" +
+      "Your current key will stop working immediately. " +
+      "You'll need to update any integrations that use the old key."
+    );
+    if (!ok) return;
+    setRegenError(null);
+    setRegenLoading(true);
+    try {
+      const newKey = await regenerateKey();
+      setIssued({ apiKey: newKey, email: user.email, name: user.name });
+    } catch (err) {
+      setRegenError(err instanceof Error ? err.message : "Failed to regenerate key.");
+    } finally {
+      setRegenLoading(false);
+    }
   };
 
   return (
@@ -465,19 +490,44 @@ export function ApiDocsPage() {
           </p>
 
           <div style={{ marginTop: "20px", display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-            <button
-              onClick={() => setSignupOpen(true)}
-              style={{
-                padding: "10px 18px",
-                fontSize: "12px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
-                background: "#a78bfa", color: "#0f0f23",
-                border: "none", borderRadius: "8px", cursor: "pointer",
-                boxShadow: "0 0 16px rgba(167,139,250,0.35)",
-              }}
-            >
-              Get an API key
-            </button>
+            {user ? (
+              <button
+                onClick={onRegenerate}
+                disabled={regenLoading}
+                style={{
+                  padding: "10px 18px",
+                  fontSize: "12px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
+                  background: regenLoading ? "rgba(244,114,182,0.4)" : "#f472b6",
+                  color: "#0f0f23",
+                  border: "none", borderRadius: "8px",
+                  cursor: regenLoading ? "wait" : "pointer",
+                  boxShadow: regenLoading ? "none" : "0 0 16px rgba(244,114,182,0.35)",
+                  transition: "background 0.15s ease, box-shadow 0.15s ease",
+                }}
+              >
+                {regenLoading ? "Regenerating…" : "Regenerate API key"}
+              </button>
+            ) : (
+              <button
+                onClick={() => setSignupOpen(true)}
+                style={{
+                  padding: "10px 18px",
+                  fontSize: "12px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
+                  background: "#a78bfa", color: "#0f0f23",
+                  border: "none", borderRadius: "8px", cursor: "pointer",
+                  boxShadow: "0 0 16px rgba(167,139,250,0.35)",
+                }}
+              >
+                Get an API key
+              </button>
+            )}
           </div>
+
+          {regenError && (
+            <p style={{ marginTop: "10px", fontSize: "11px", color: "#fca5a5" }}>
+              {regenError}
+            </p>
+          )}
 
           <p style={{ marginTop: "16px", fontSize: "11px", color: "#64748b", lineHeight: 1.55 }}>
             Community tier: <strong style={{ color: "#cbd5e1" }}>5 requests / minute</strong>.

@@ -23,6 +23,9 @@ export interface AuthUser {
   access_levels:  string[];
   api_key_prefix: string;
   rate_limit_per_min: number | null;
+  /** Bearer token for user-action endpoints (e.g. regenerate-key).
+   *  Issued at login/signup. May be undefined for older sessions. */
+  session_token?: string;
 }
 
 /** True when the user's level set grants unlimited rate-limit. */
@@ -97,6 +100,7 @@ export function useAuth() {
       access_levels:      Array.isArray(data.access_levels) ? data.access_levels : ["basic"],
       api_key_prefix:     data.api_key_prefix,
       rate_limit_per_min: data.rate_limit_per_min ?? null,
+      session_token:      data.session_token,
     };
     writeAuth(next);
     setUser(next);
@@ -116,5 +120,32 @@ export function useAuth() {
     setUser(u);
   }, []);
 
-  return { user, login, logout, setAuthFromSignup };
+  /**
+   * Mint a fresh API key for the currently-logged-in user, replacing the old
+   * one server-side. Returns the raw key (shown only once) on success.
+   * The session token authenticates the call, so no password re-prompt is
+   * required.
+   */
+  const regenerateKey = useCallback(async (): Promise<string> => {
+    if (!user) throw new Error("Not logged in.");
+    if (!user.session_token) {
+      throw new Error("Your session is too old. Log out and log back in to refresh it.");
+    }
+    const res = await fetch(`${API_BASE}/v1/auth/regenerate-key`, {
+      method:  "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${user.session_token}`,
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || `Could not regenerate key (${res.status}).`);
+    // Refresh the local auth record with the new prefix
+    const next: AuthUser = { ...user, api_key_prefix: data.api_key_prefix };
+    writeAuth(next);
+    setUser(next);
+    return data.api_key as string;
+  }, [user]);
+
+  return { user, login, logout, setAuthFromSignup, regenerateKey };
 }
