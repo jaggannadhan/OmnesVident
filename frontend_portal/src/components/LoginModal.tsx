@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../hooks/useAuth";
+import { PasswordInput } from "./PasswordInput";
 
 interface LoginModalProps {
   open:         boolean;
@@ -111,8 +112,8 @@ export function LoginModal({ open, onClose, onSwitchToSignup }: LoginModalProps)
 
           <label style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>Password</span>
-            <input
-              type="password" autoComplete="current-password" required
+            <PasswordInput
+              autoComplete="current-password" required
               value={password} onChange={(e) => setPassword(e.target.value)}
               style={{
                 background: "rgba(15,23,42,0.6)",

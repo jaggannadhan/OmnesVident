@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../hooks/useAuth";
+import { PasswordInput } from "./PasswordInput";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
 
@@ -176,8 +177,8 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
             <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>
               Password <span style={{ color: "#475569", textTransform: "none", letterSpacing: 0 }}>· min {PASSWORD_MIN} chars</span>
             </span>
-            <input
-              type="password" value={pw} required minLength={PASSWORD_MIN} maxLength={128}
+            <PasswordInput
+              value={pw} required minLength={PASSWORD_MIN} maxLength={128}
               autoComplete="new-password"
               onChange={(e) => setPw(e.target.value)}
               style={inputBaseStyle} onFocus={focusOn} onBlur={blurOn}
@@ -186,8 +187,8 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
 
           <label style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>Confirm password</span>
-            <input
-              type="password" value={pw2} required minLength={PASSWORD_MIN} maxLength={128}
+            <PasswordInput
+              value={pw2} required minLength={PASSWORD_MIN} maxLength={128}
               autoComplete="new-password"
               onChange={(e) => setPw2(e.target.value)}
               aria-invalid={pwMismatch || undefined}
