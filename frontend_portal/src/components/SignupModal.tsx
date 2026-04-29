@@ -7,6 +7,11 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/
 
 const PASSWORD_MIN = 8;
 
+// Practical email regex: exactly one @, plausible domain, TLD ≥ 2 letters.
+// Backend (Pydantic EmailStr) does the rigorous RFC-compliant check; this is
+// only for fast client-side feedback.
+const EMAIL_RX = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
 interface SignupModalProps {
   open: boolean;
   onClose: () => void;
@@ -55,6 +60,12 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // ─── Live email validation ─────────────────────────────────────────────────
+  const emailTrim   = email.trim();
+  const emailEmpty  = emailTrim.length === 0;
+  const emailValid  = !emailEmpty && EMAIL_RX.test(emailTrim);
+  const emailBad    = !emailEmpty && !emailValid;
+
   // ─── Live password validation ──────────────────────────────────────────────
   // Each criterion lights up as the user types. Submit is disabled until all
   // pass AND the confirm field matches.
@@ -76,10 +87,10 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
     e.preventDefault();
     setError(null);
 
-    if (name.trim().length < 2)            { setError("Please enter your name."); return; }
-    if (!/^\S+@\S+\.\S+$/.test(email))     { setError("Enter a valid email address."); return; }
-    if (!pwAllValid)                       { setError("Password does not meet all the requirements below."); return; }
-    if (pw !== pw2)                        { setError("Passwords do not match."); return; }
+    if (name.trim().length < 2)  { setError("Please enter your name."); return; }
+    if (!emailValid)             { setError("Enter a valid email address."); return; }
+    if (!pwAllValid)             { setError("Password does not meet all the requirements below."); return; }
+    if (pw !== pw2)              { setError("Passwords do not match."); return; }
 
     setLoading(true);
     try {
@@ -178,9 +189,34 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
             <input
               type="email" value={email} required
               autoComplete="email"
+              aria-invalid={emailBad || undefined}
+              aria-describedby={emailBad ? "email-error" : undefined}
               onChange={(e) => setEmail(e.target.value)}
-              style={inputBaseStyle} onFocus={focusOn} onBlur={blurOn}
+              style={{
+                ...inputBaseStyle,
+                borderColor:
+                  emailEmpty  ? "rgba(148,163,184,0.18)"
+                  : emailValid ? "rgba(74,222,128,0.4)"
+                  :              "rgba(239,68,68,0.4)",
+              }}
+              onFocus={focusOn} onBlur={blurOn}
             />
+            {emailBad && (
+              <span
+                id="email-error"
+                role="alert"
+                style={{
+                  marginTop: "2px",
+                  fontSize: "10px",
+                  color: "#fca5a5",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                }}
+              >
+                <span aria-hidden="true">✕</span> Enter a valid email address
+              </span>
+            )}
           </label>
 
           <label style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -289,21 +325,26 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={loading || pwMismatch || !pwAllValid}
-            style={{
-              marginTop: "4px", padding: "10px 14px",
-              fontSize: "12px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
-              background: (loading || pwMismatch || !pwAllValid) ? "rgba(167,139,250,0.4)" : "#a78bfa",
-              color: "#0f0f23", border: "none", borderRadius: "8px",
-              cursor: (loading || pwMismatch || !pwAllValid) ? "not-allowed" : "pointer",
-              boxShadow: (loading || pwMismatch || !pwAllValid) ? "none" : "0 0 16px rgba(167,139,250,0.35)",
-              transition: "background 0.15s ease, box-shadow 0.15s ease",
-            }}
-          >
-            {loading ? "Signing up…" : "Sign up"}
-          </button>
+          {(() => {
+            const blocked = loading || pwMismatch || !pwAllValid || !emailValid;
+            return (
+              <button
+                type="submit"
+                disabled={blocked}
+                style={{
+                  marginTop: "4px", padding: "10px 14px",
+                  fontSize: "12px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
+                  background: blocked ? "rgba(167,139,250,0.4)" : "#a78bfa",
+                  color: "#0f0f23", border: "none", borderRadius: "8px",
+                  cursor: blocked ? "not-allowed" : "pointer",
+                  boxShadow: blocked ? "none" : "0 0 16px rgba(167,139,250,0.35)",
+                  transition: "background 0.15s ease, box-shadow 0.15s ease",
+                }}
+              >
+                {loading ? "Signing up…" : "Sign up"}
+              </button>
+            );
+          })()}
         </form>
 
         {onSwitchToLogin && (
