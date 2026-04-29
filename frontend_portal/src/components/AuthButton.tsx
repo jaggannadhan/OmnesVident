@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { initialsOf, useAuth } from "../hooks/useAuth";
+import { accessLevelLabel, hasUnlimitedAccess, initialsOf, useAuth } from "../hooks/useAuth";
 import { LoginModal } from "./LoginModal";
 import { SignupModal } from "./SignupModal";
 
@@ -64,19 +64,33 @@ export function AuthButton() {
   }
 
   // ─── Logged in: avatar circle + dropdown ───────────────────────────────────
-  const isSuper = user.access_level === "super-user";
+  const levels    = user.access_levels ?? ["basic"];
+  const isAdmin   = levels.includes("admin");
+  const unlimited = hasUnlimitedAccess(levels);
+
+  // Pick a colour theme based on the highest tier the user holds
+  const avatarTheme = isAdmin
+    ? "bg-gradient-to-br from-rose-400 to-amber-500 text-slate-900 shadow-[0_0_10px_rgba(251,113,133,0.45)]"
+    : levels.includes("super_user")
+    ? "bg-gradient-to-br from-amber-400 to-orange-500 text-slate-900 shadow-[0_0_10px_rgba(251,191,36,0.45)]"
+    : levels.includes("premium")
+    ? "bg-gradient-to-br from-fuchsia-400 to-violet-500 text-slate-900 shadow-[0_0_10px_rgba(217,70,239,0.45)]"
+    : "bg-gradient-to-br from-cyan-400 to-violet-500 text-slate-900 shadow-[0_0_10px_rgba(167,139,250,0.45)]";
+
+  const tierColor = (lvl: string) =>
+    lvl === "admin"      ? "text-rose-300 bg-rose-400/10 border-rose-400/30" :
+    lvl === "super_user" ? "text-amber-300 bg-amber-400/10 border-amber-400/30" :
+    lvl === "premium"    ? "text-fuchsia-300 bg-fuchsia-400/10 border-fuchsia-400/30" :
+                           "text-cyan-300 bg-cyan-400/10 border-cyan-400/30";
+
   return (
     <div ref={wrapperRef} className="relative">
       <button
         onClick={() => setMenuOpen((p) => !p)}
-        className={`flex items-center justify-center w-7 h-7 rounded-full text-[10px] font-bold uppercase tracking-wider transition-shadow ${
-          isSuper
-            ? "bg-gradient-to-br from-amber-400 to-orange-500 text-slate-900 shadow-[0_0_10px_rgba(251,191,36,0.45)]"
-            : "bg-gradient-to-br from-cyan-400 to-violet-500 text-slate-900 shadow-[0_0_10px_rgba(167,139,250,0.45)]"
-        }`}
+        className={`flex items-center justify-center w-7 h-7 rounded-full text-[10px] font-bold uppercase tracking-wider transition-shadow ${avatarTheme}`}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        title={user.name}
+        title={`${user.name} · ${levels.map(accessLevelLabel).join(", ")}`}
       >
         {initialsOf(user.name)}
       </button>
@@ -84,21 +98,27 @@ export function AuthButton() {
       {menuOpen && (
         <div
           role="menu"
-          className="absolute right-0 top-full mt-2 z-50 w-56 rounded-lg border border-rim bg-base shadow-2xl shadow-black/40 overflow-hidden"
+          className="absolute right-0 top-full mt-2 z-50 w-60 rounded-lg border border-rim bg-base shadow-2xl shadow-black/40 overflow-hidden"
         >
           <div className="px-3 py-2.5 border-b border-rim">
             <p className="text-xs font-semibold text-slate-200 truncate">{user.name}</p>
             <p className="text-[10px] text-slate-500 font-mono truncate">{user.email}</p>
-            <p className="text-[9px] mt-1.5 font-mono uppercase tracking-widest">
-              <span className={isSuper ? "text-amber-400" : "text-cyan-400"}>
-                {isSuper ? "Super-user" : "Community"}
-              </span>
-              <span className="text-slate-700"> · </span>
-              <span className="text-slate-500">
-                {user.rate_limit_per_min === 0 || user.rate_limit_per_min === null
-                  ? (isSuper ? "unlimited" : "5 req/min")
-                  : `${user.rate_limit_per_min} req/min`}
-              </span>
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {levels.map((lvl) => (
+                <span
+                  key={lvl}
+                  className={`text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded border ${tierColor(lvl)}`}
+                >
+                  {accessLevelLabel(lvl)}
+                </span>
+              ))}
+            </div>
+            <p className="text-[9px] mt-2 font-mono text-slate-500">
+              {user.rate_limit_per_min === 0 || (user.rate_limit_per_min == null && unlimited)
+                ? "unlimited rate"
+                : user.rate_limit_per_min == null
+                ? "5 req/min"
+                : `${user.rate_limit_per_min} req/min`}
             </p>
           </div>
 

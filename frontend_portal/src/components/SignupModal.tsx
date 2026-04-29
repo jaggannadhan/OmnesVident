@@ -113,7 +113,7 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
         user_id:            data.user_id,
         name:               data.name,
         email:              data.email,
-        access_level:       data.access_level,
+        access_levels:      Array.isArray(data.access_levels) ? data.access_levels : ["basic"],
         api_key_prefix:     data.api_key_prefix,
         rate_limit_per_min: data.rate_limit_per_min ?? null,
       });

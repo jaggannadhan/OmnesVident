@@ -20,9 +20,26 @@ export interface AuthUser {
   user_id:        string;
   name:           string;
   email:          string;
-  access_level:   string;
+  access_levels:  string[];
   api_key_prefix: string;
   rate_limit_per_min: number | null;
+}
+
+/** True when the user's level set grants unlimited rate-limit. */
+export function hasUnlimitedAccess(levels: string[] | undefined): boolean {
+  if (!levels) return false;
+  return levels.includes("super_user") || levels.includes("admin");
+}
+
+/** Pretty label for a single access level. */
+export function accessLevelLabel(level: string): string {
+  switch (level) {
+    case "basic":      return "Basic";
+    case "super_user": return "Super-user";
+    case "admin":      return "Admin";
+    case "premium":    return "Premium";
+    default:           return level;
+  }
 }
 
 function readAuth(): AuthUser | null {
@@ -77,7 +94,7 @@ export function useAuth() {
       user_id:            data.user_id,
       name:               data.name,
       email:              data.email,
-      access_level:       data.access_level,
+      access_levels:      Array.isArray(data.access_levels) ? data.access_levels : ["basic"],
       api_key_prefix:     data.api_key_prefix,
       rate_limit_per_min: data.rate_limit_per_min ?? null,
     };
