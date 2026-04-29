@@ -1,0 +1,103 @@
+/**
+ * useAuth — tiny localStorage-backed auth state for the public-API web UI.
+ *
+ * We persist a slim "AuthUser" record (no API key, no password) so the user
+ * can refresh the page or open new tabs and stay "logged in". Cross-tab sync
+ * piggy-backs on the native `storage` event.
+ *
+ * The API key itself is shown ONCE at signup time and not re-derivable from
+ * the server (we only keep its sha256 hash). Login confirms identity for the
+ * UI; programmatic API calls still need the raw key the user saved.
+ */
+
+import { useCallback, useEffect, useState } from "react";
+
+const STORAGE_KEY = "omnesvident.auth";
+const API_BASE =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
+
+export interface AuthUser {
+  user_id:        string;
+  name:           string;
+  email:          string;
+  access_level:   string;
+  api_key_prefix: string;
+  rate_limit_per_min: number | null;
+}
+
+function readAuth(): AuthUser | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AuthUser;
+    if (parsed && typeof parsed.email === "string") return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeAuth(user: AuthUser | null): void {
+  try {
+    if (user) localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+    else      localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* localStorage unavailable (private mode); silently ignore */
+  }
+}
+
+export function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+export function useAuth() {
+  const [user, setUser] = useState<AuthUser | null>(readAuth);
+
+  // Cross-tab sync: when the user logs in/out in another tab, mirror it here.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY) setUser(readAuth());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const login = useCallback(async (email: string, password: string): Promise<AuthUser> => {
+    const res = await fetch(`${API_BASE}/v1/auth/login`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ email: email.trim().toLowerCase(), password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || `Login failed (${res.status}).`);
+    const next: AuthUser = {
+      user_id:            data.user_id,
+      name:               data.name,
+      email:              data.email,
+      access_level:       data.access_level,
+      api_key_prefix:     data.api_key_prefix,
+      rate_limit_per_min: data.rate_limit_per_min ?? null,
+    };
+    writeAuth(next);
+    setUser(next);
+    return next;
+  }, []);
+
+  const logout = useCallback(() => {
+    writeAuth(null);
+    setUser(null);
+  }, []);
+
+  // Used by the signup flow — once the user has been issued an API key, their
+  // identity is also known, so we can lift them straight into the logged-in
+  // state without a separate /login round-trip.
+  const setAuthFromSignup = useCallback((u: AuthUser) => {
+    writeAuth(u);
+    setUser(u);
+  }, []);
+
+  return { user, login, logout, setAuthFromSignup };
+}

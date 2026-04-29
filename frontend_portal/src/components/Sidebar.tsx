@@ -1,6 +1,7 @@
 import { CATEGORY_META } from "./NewsCard";
 import { RegionCombobox } from "./RegionCombobox";
 import { CategoryDropdown } from "./CategoryDropdown";
+import { AuthButton } from "./AuthButton";
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -39,12 +40,15 @@ export function Sidebar({
   return (
     <aside className="flex flex-col gap-6 h-full overflow-y-auto py-4 px-3">
 
-      {/* Logo */}
-      <div className="flex flex-col gap-0.5 px-1 pb-2 border-b border-rim">
-        <h1 className="text-base font-bold tracking-tight text-white">
-          Omnes<span className="text-cyan-400">Vident</span>
-        </h1>
-        <p className="text-[10px] text-slate-600 font-mono">Global News Discovery</p>
+      {/* Logo + auth control */}
+      <div className="flex items-start justify-between gap-2 px-1 pb-2 border-b border-rim">
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <h1 className="text-base font-bold tracking-tight text-white">
+            Omnes<span className="text-cyan-400">Vident</span>
+          </h1>
+          <p className="text-[10px] text-slate-600 font-mono">Global News Discovery</p>
+        </div>
+        <AuthButton />
       </div>
 
       {/* Active filters summary */}
