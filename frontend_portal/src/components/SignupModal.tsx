@@ -55,10 +55,20 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // Live password-match status — used both for the inline hint under the
-  // confirm input and to disable the submit button until they match.
+  // ─── Live password validation ──────────────────────────────────────────────
+  // Each criterion lights up as the user types. Submit is disabled until all
+  // pass AND the confirm field matches.
+  const pwChecks = {
+    length:  pw.length >= PASSWORD_MIN,
+    upper:   /[A-Z]/.test(pw),
+    lower:   /[a-z]/.test(pw),
+    number:  /\d/.test(pw),
+    special: /[^A-Za-z0-9]/.test(pw),
+  };
+  const pwAllValid = Object.values(pwChecks).every(Boolean);
+
   const pwMismatch = pw2.length > 0 && pw !== pw2;
-  const pwMatched  = pw2.length > 0 && pw === pw2 && pw.length >= PASSWORD_MIN;
+  const pwMatched  = pw2.length > 0 && pw === pw2 && pwAllValid;
 
   if (!open) return null;
 
@@ -68,7 +78,7 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
 
     if (name.trim().length < 2)            { setError("Please enter your name."); return; }
     if (!/^\S+@\S+\.\S+$/.test(email))     { setError("Enter a valid email address."); return; }
-    if (pw.length < PASSWORD_MIN)          { setError(`Password must be at least ${PASSWORD_MIN} characters.`); return; }
+    if (!pwAllValid)                       { setError("Password does not meet all the requirements below."); return; }
     if (pw !== pw2)                        { setError("Passwords do not match."); return; }
 
     setLoading(true);
@@ -175,7 +185,7 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
 
           <label style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>
-              Password <span style={{ color: "#475569", textTransform: "none", letterSpacing: 0 }}>· min {PASSWORD_MIN} chars</span>
+              Password
             </span>
             <PasswordInput
               value={pw} required minLength={PASSWORD_MIN} maxLength={128}
@@ -183,6 +193,43 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
               onChange={(e) => setPw(e.target.value)}
               style={inputBaseStyle} onFocus={focusOn} onBlur={blurOn}
             />
+            {/* Requirement checklist — each item turns green ✓ as it's met. */}
+            <div
+              role="list"
+              aria-label="Password requirements"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "2px 10px",
+                marginTop: "4px",
+              }}
+            >
+              {([
+                ["length",  `At least ${PASSWORD_MIN} characters`],
+                ["upper",   "One uppercase (A–Z)"],
+                ["lower",   "One lowercase (a–z)"],
+                ["number",  "One number (0–9)"],
+                ["special", "One special character"],
+              ] as const).map(([key, label]) => {
+                const ok = pwChecks[key];
+                return (
+                  <span
+                    key={key}
+                    role="listitem"
+                    style={{
+                      fontSize: "10px",
+                      color: pw.length === 0 ? "#475569" : ok ? "#86efac" : "#fca5a5",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "5px",
+                    }}
+                  >
+                    <span aria-hidden="true">{ok ? "✓" : "•"}</span>
+                    {label}
+                  </span>
+                );
+              })}
+            </div>
           </label>
 
           <label style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -243,14 +290,15 @@ export function SignupModal({ open, onClose, onSuccess, onSwitchToLogin }: Signu
           )}
 
           <button
-            type="submit" disabled={loading || pwMismatch}
+            type="submit"
+            disabled={loading || pwMismatch || !pwAllValid}
             style={{
               marginTop: "4px", padding: "10px 14px",
               fontSize: "12px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
-              background: (loading || pwMismatch) ? "rgba(167,139,250,0.4)" : "#a78bfa",
+              background: (loading || pwMismatch || !pwAllValid) ? "rgba(167,139,250,0.4)" : "#a78bfa",
               color: "#0f0f23", border: "none", borderRadius: "8px",
-              cursor: (loading || pwMismatch) ? "not-allowed" : "pointer",
-              boxShadow: (loading || pwMismatch) ? "none" : "0 0 16px rgba(167,139,250,0.35)",
+              cursor: (loading || pwMismatch || !pwAllValid) ? "not-allowed" : "pointer",
+              boxShadow: (loading || pwMismatch || !pwAllValid) ? "none" : "0 0 16px rgba(167,139,250,0.35)",
               transition: "background 0.15s ease, box-shadow 0.15s ease",
             }}
           >
