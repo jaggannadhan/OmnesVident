@@ -5,6 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OmnesVident — Global News Discovery</title>
     <meta name="description" content="Real-time global news discovery portal. Explore breaking stories by region and category." />
+    <!-- Apply saved theme before React mounts so we don't flash the wrong colors. -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("omnesvident.theme");
+          var theme = (saved === "light" || saved === "dark") ? saved : "dark";
+          var root = document.documentElement;
+          root.classList.remove("dark", "light");
+          root.classList.add(theme);
+        } catch (_) {
+          /* localStorage unavailable; fall back to default `class="dark"` */
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />

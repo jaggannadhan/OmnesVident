@@ -5,14 +5,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Command-Center palette
-        base: "#06060f",
-        surface: "#0d0d1a",
-        panel: "#121228",
-        card: "#181832",
-        "card-hover": "#1e1e3c",
-        rim: "#2a2a50",
-        "rim-bright": "#3d3d6e",
+        // Command-Center palette — driven by CSS variables so the values
+        // swap between dark and light themes via the class on <html>.
+        // See index.css for the bindings.
+        base:        "var(--color-base)",
+        surface:     "var(--color-surface)",
+        panel:       "var(--color-panel)",
+        card:        "var(--color-card)",
+        "card-hover":"var(--color-card-hover)",
+        rim:         "var(--color-rim)",
+        "rim-bright":"var(--color-rim-bright)",
       },
       fontFamily: {
         sans: ['"Inter"', "system-ui", "sans-serif"],

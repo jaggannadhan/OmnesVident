@@ -2,11 +2,44 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Theme tokens ──────────────────────────────────────────────────────────
+   The Tailwind palette names (bg-base, bg-surface, …) resolve to these CSS
+   variables, so swapping the class on <html> retheme the entire app.
+   We default to dark; the inline script in index.html applies the saved
+   preference before React mounts to avoid a first-paint flash.
+*/
+:root,
+html.dark {
+  --color-base:        #06060f;
+  --color-surface:     #0d0d1a;
+  --color-panel:       #121228;
+  --color-card:        #181832;
+  --color-card-hover:  #1e1e3c;
+  --color-rim:         #2a2a50;
+  --color-rim-bright:  #3d3d6e;
+  --color-text:        #f1f5f9; /* slate-100 */
+  --color-scroll-track:#06060f;
+}
+
+html.light {
+  --color-base:        #f8fafc; /* slate-50  */
+  --color-surface:     #ffffff;
+  --color-panel:       #f1f5f9; /* slate-100 */
+  --color-card:        #ffffff;
+  --color-card-hover:  #e2e8f0; /* slate-200 */
+  --color-rim:         #cbd5e1; /* slate-300 */
+  --color-rim-bright:  #94a3b8; /* slate-400 */
+  --color-text:        #0f172a; /* slate-900 */
+  --color-scroll-track:#f1f5f9;
+}
+
 @layer base {
   html {
-    @apply bg-base text-slate-100;
-    scrollbar-color: #2a2a50 #06060f;
+    @apply bg-base;
+    color: var(--color-text);
+    scrollbar-color: var(--color-rim) var(--color-scroll-track);
     scrollbar-width: thin;
+    transition: background-color 0.18s ease, color 0.18s ease;
   }
 
   ::-webkit-scrollbar {
