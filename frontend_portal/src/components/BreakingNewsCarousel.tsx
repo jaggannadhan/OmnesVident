@@ -8,44 +8,6 @@ const BREAKING_COLOR     = "#FF2020";
 const SWIPE_THRESHOLD_PX = 40;     // distance required to commit a slow swipe
 const FLICK_VELOCITY_PXMS = 0.35;  // px/ms — a fast flick commits even at short distance
 
-// ─── HeatBar — visual urgency indicator ──────────────────────────────────────
-
-function HeatBar({ score }: { score: number }) {
-  const pct = Math.max(0, Math.min(100, score));
-  const color =
-    pct >= 90 ? "#FF2020" :
-    pct >= 70 ? "#ff6b35" :
-    pct >= 40 ? "#facc15" :
-               "#4ade80";
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-      <div
-        style={{
-          flex: 1,
-          height: "3px",
-          borderRadius: "2px",
-          background: "rgba(255,255,255,0.08)",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            width: `${pct}%`,
-            height: "100%",
-            background: color,
-            boxShadow: `0 0 6px ${color}`,
-            transition: "width 0.4s ease",
-          }}
-        />
-      </div>
-      <span style={{ fontSize: "8px", fontFamily: "monospace", color, fontWeight: 700, minWidth: "22px" }}>
-        {pct}
-      </span>
-    </div>
-  );
-}
-
 // ─── BreakingNewsCarousel ─────────────────────────────────────────────────────
 
 interface BreakingNewsCarouselProps {
@@ -256,7 +218,7 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
           </span>
         </div>
         <span style={{ fontSize: "9px", fontFamily: "monospace", color: "#475569" }}>
-          {sorted.length} alert{sorted.length !== 1 ? "s" : ""}
+          {Math.min(activeIdx, sorted.length - 1) + 1}/{sorted.length}
         </span>
       </div>
 
@@ -280,9 +242,6 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
           transition: isDragging ? "none" : "transform 0.25s ease, opacity 0.25s ease",
         }}
       >
-        {/* Heat bar */}
-        <HeatBar score={story.heat_score} />
-
         {/* Meta: category + region + time */}
         <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
           <span
@@ -352,6 +311,33 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
           Read full story ↗
         </a>
       </div>
+
+      {/* Auto-rotate progress bar — animates 0→100% over ROTATE_INTERVAL_MS.
+          Re-mounts on every slide change (key={activeIdx}) so the animation
+          restarts from 0. Pauses while the user is dragging the card. */}
+      {sorted.length > 1 && (
+        <div
+          style={{
+            height: "2px",
+            background: `${BREAKING_COLOR}1a`,
+            flexShrink: 0,
+            overflow: "hidden",
+          }}
+          aria-hidden="true"
+        >
+          <div
+            key={activeIdx}
+            style={{
+              height: "100%",
+              background: BREAKING_COLOR,
+              boxShadow: `0 0 4px ${BREAKING_COLOR}`,
+              animation: `breakingProgress ${ROTATE_INTERVAL_MS}ms linear forwards`,
+              animationPlayState: isDragging ? "paused" : "running",
+              transformOrigin: "left center",
+            }}
+          />
+        </div>
+      )}
 
       {/* Dot navigation + arrows — capped at 4 dots even for many stories */}
       {sorted.length > 1 && (() => {
@@ -431,11 +417,15 @@ export function BreakingNewsCarousel({ stories }: BreakingNewsCarouselProps) {
         );
       })()}
 
-      {/* Inline keyframes for the pulsing dot */}
+      {/* Inline keyframes for the pulsing dot + auto-rotate progress bar */}
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; transform: scale(1); }
           50%       { opacity: 0.5; transform: scale(0.75); }
+        }
+        @keyframes breakingProgress {
+          from { width: 0%; }
+          to   { width: 100%; }
         }
       `}</style>
     </div>

@@ -53,7 +53,14 @@ function GlobeWithCarousel({ regionCode, categories, dateRange }: GlobeWithCarou
 
   return (
     <div style={{ display: "flex", gap: "12px", alignItems: "stretch", height: "480px" }}>
-      {/* Globe — 70% or full width when no breaking stories */}
+      {/* Breaking News Carousel — left 30%, only when breaking stories exist */}
+      {breakingStories.length > 0 && (
+        <div style={{ flex: "0 0 30%", minWidth: 0 }}>
+          <BreakingNewsCarousel stories={breakingStories} />
+        </div>
+      )}
+
+      {/* Globe — right 70%, or full width when no breaking stories */}
       <div style={{ flex: breakingStories.length > 0 ? "0 0 70%" : "1 1 100%", minWidth: 0 }}>
         <GlobeErrorBoundary>
           <Suspense
@@ -75,13 +82,6 @@ function GlobeWithCarousel({ regionCode, categories, dateRange }: GlobeWithCarou
           </Suspense>
         </GlobeErrorBoundary>
       </div>
-
-      {/* Breaking News Carousel — 30%, only when breaking stories exist */}
-      {breakingStories.length > 0 && (
-        <div style={{ flex: "0 0 30%", minWidth: 0 }}>
-          <BreakingNewsCarousel stories={breakingStories} />
-        </div>
-      )}
     </div>
   );
 }

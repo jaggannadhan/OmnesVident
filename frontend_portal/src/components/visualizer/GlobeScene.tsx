@@ -67,52 +67,32 @@ function GlobeLoader() {
 }
 
 // ---------------------------------------------------------------------------
-// Legend overlay — collapsible
+// Legend — always-visible vertical list anchored to the top-left of the globe
 // ---------------------------------------------------------------------------
 
-const LEGEND_PREVIEW_COLORS = ["#f87171", "#22d3ee", "#34d399", "#a78bfa", "#fb923c"];
-
-function CollapsibleLegend() {
-  const [open, setOpen] = useState(false);
+function LegendList() {
   const entries = Object.entries(CATEGORY_COLORS);
 
   return (
-    <div className="absolute bottom-3 left-3 z-10">
-      {/* Toggle button — always visible */}
-      <button
-        onClick={() => setOpen((p) => !p)}
-        className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-rim bg-base/80 backdrop-blur-sm text-slate-400 hover:text-slate-200 hover:border-rim-bright transition-colors"
-      >
-        {/* Mini colour dots */}
-        <span className="flex gap-0.5">
-          {LEGEND_PREVIEW_COLORS.map((c) => (
-            <span
-              key={c}
-              className="inline-block w-1.5 h-1.5 rounded-full"
-              style={{ background: c, boxShadow: `0 0 3px ${c}` }}
-            />
-          ))}
-        </span>
-        <span className="text-[9px] font-mono uppercase tracking-widest">Legend</span>
-        <span className="text-[8px] text-slate-600">{open ? "▲" : "▼"}</span>
-      </button>
-
-      {/* Expanded panel */}
-      {open && (
-        <div className="mt-1 p-2 rounded-md border border-rim bg-base/90 backdrop-blur-sm flex flex-wrap gap-x-3 gap-y-1.5 max-w-[260px]">
-          {entries.map(([cat, color]) => (
-            <div key={cat} className="flex items-center gap-1">
-              <span
-                className="inline-block w-2 h-2 rounded-full shrink-0"
-                style={{ background: color, boxShadow: `0 0 4px ${color}` }}
-              />
-              <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider">
-                {CATEGORY_META[cat]?.label ?? cat}
-              </span>
-            </div>
-          ))}
+    <div
+      className="absolute top-3 left-3 z-10 flex flex-col gap-1 px-2.5 py-2 rounded-md border border-rim bg-base/70 backdrop-blur-sm pointer-events-none"
+      aria-label="Category legend"
+    >
+      <p className="text-[9px] font-mono uppercase tracking-widest text-slate-600 mb-0.5">
+        Legend
+      </p>
+      {entries.map(([cat, color]) => (
+        <div key={cat} className="flex items-center gap-2">
+          <span
+            className="inline-block w-2 h-2 rounded-full shrink-0"
+            style={{ background: color, boxShadow: `0 0 4px ${color}` }}
+            aria-hidden="true"
+          />
+          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider whitespace-nowrap">
+            {CATEGORY_META[cat]?.label ?? cat}
+          </span>
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -310,7 +290,7 @@ export function GlobeScene({ region, categories, startDate, endDate }: GlobeScen
         />
       )}
 
-      <CollapsibleLegend />
+      <LegendList />
     </div>
   );
 }
