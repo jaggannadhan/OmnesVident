@@ -80,12 +80,9 @@ export function Sidebar({
         </div>
       )}
 
-      {/* Category — multi-select dropdown */}
-      <SidebarSection title="Category">
-        <CategoryDropdown
-          selectedCategories={selectedCategories}
-          onChange={onCategoriesChange}
-        />
+      {/* Date filter — preset badges + optional custom range */}
+      <SidebarSection title="Date">
+        <GlobeControls value={dateRange} onChange={onDateRangeChange} />
       </SidebarSection>
 
       {/* Regions — searchable combobox grouped by continent */}
@@ -96,9 +93,12 @@ export function Sidebar({
         />
       </SidebarSection>
 
-      {/* Date filter — preset badges + optional custom range */}
-      <SidebarSection title="Date">
-        <GlobeControls value={dateRange} onChange={onDateRangeChange} />
+      {/* Category — multi-select dropdown */}
+      <SidebarSection title="Category">
+        <CategoryDropdown
+          selectedCategories={selectedCategories}
+          onChange={onCategoriesChange}
+        />
       </SidebarSection>
 
       {/* Fair use footer */}

@@ -5,15 +5,24 @@ import type { Mesh, MeshBasicMaterial } from "three";
 import type { Vector3 } from "three";
 import type { StoryOut } from "../../services/api";
 
-/** Map category → hex colour per the A&D spec + extended palette */
+/** Map category → hex colour, one per VIBGYOR letter so the seven categories
+ *  are unambiguously distinguishable on the globe.
+ *    V  WORLD          (Violet)
+ *    I  BUSINESS       (Indigo)
+ *    B  HEALTH         (Blue)
+ *    G  SCIENCE_TECH   (Green)
+ *    Y  POLITICS       (Yellow)
+ *    O  SPORTS         (Orange)
+ *    R  ENTERTAINMENT  (Red)
+ */
 export const CATEGORY_COLORS: Record<string, string> = {
-  WORLD:         "#A78BFA",  // Neon Violet
-  POLITICS:      "#FACC15",  // Neon Yellow
-  SCIENCE_TECH:  "#4ADE80",  // Neon Green
-  BUSINESS:      "#C084FC",  // Neon Purple
-  HEALTH:        "#22D3EE",  // Teal / Cyan
-  ENTERTAINMENT: "#F472B6",  // Neon Pink
-  SPORTS:        "#FB923C",  // Neon Orange
+  WORLD:         "#A78BFA",  // Violet  (violet-400)
+  BUSINESS:      "#818CF8",  // Indigo  (indigo-400)
+  HEALTH:        "#60A5FA",  // Blue    (blue-400)
+  SCIENCE_TECH:  "#4ADE80",  // Green   (green-400)
+  POLITICS:      "#FACC15",  // Yellow  (yellow-400)
+  SPORTS:        "#FB923C",  // Orange  (orange-400)
+  ENTERTAINMENT: "#F87171",  // Red     (red-400)
 };
 
 interface MarkerProps {

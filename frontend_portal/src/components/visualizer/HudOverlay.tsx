@@ -11,14 +11,15 @@ const CARD_H    = 174;  // px  — estimated card height
 const CARD_DX   = 14;   // px  — matches translate(14px, ...)
 
 // ─── Category accent colours ──────────────────────────────────────────────────
+// VIBGYOR — one colour per category. Keep in sync with Marker.CATEGORY_COLORS.
 const CATEGORY_COLORS: Record<string, string> = {
-  WORLD:         "#a78bfa",  // Neon Violet
-  POLITICS:      "#facc15",  // Neon Yellow
-  SCIENCE_TECH:  "#4ade80",  // Neon Green
-  BUSINESS:      "#c084fc",  // Neon Purple
-  HEALTH:        "#22d3ee",  // Teal / Cyan
-  ENTERTAINMENT: "#f472b6",  // Neon Pink
-  SPORTS:        "#fb923c",  // Neon Orange
+  WORLD:         "#a78bfa",  // V  Violet
+  BUSINESS:      "#818cf8",  // I  Indigo
+  HEALTH:        "#60a5fa",  // B  Blue
+  SCIENCE_TECH:  "#4ade80",  // G  Green
+  POLITICS:      "#facc15",  // Y  Yellow
+  SPORTS:        "#fb923c",  // O  Orange
+  ENTERTAINMENT: "#f87171",  // R  Red
 };
 
 // ─── CardTethers ──────────────────────────────────────────────────────────────
