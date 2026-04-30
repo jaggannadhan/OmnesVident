@@ -7,6 +7,7 @@ import { GlobeErrorBoundary } from "./components/visualizer/GlobeErrorBoundary";
 import { type DateRange } from "./components/GlobeControls";
 import { BreakingNewsCarousel } from "./components/BreakingNewsCarousel";
 import { ApiDocsPage } from "./components/ApiDocsPage";
+import { ResetPasswordPage } from "./components/ResetPasswordPage";
 import { AuthButton } from "./components/AuthButton";
 import { useNews } from "./hooks/useNews";
 
@@ -349,6 +350,7 @@ export default function App() {
       <Route path="/" element={<FeedView />} />
       <Route path="/region/:regionCode" element={<FeedView />} />
       <Route path="/api-docs" element={<ApiDocsPage />} />
+      <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

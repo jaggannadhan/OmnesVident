@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SignupModal } from "./SignupModal";
 import { LoginModal } from "./LoginModal";
+import { ForgotPasswordModal } from "./ForgotPasswordModal";
 import { AuthButton } from "./AuthButton";
 import { useAuth } from "../hooks/useAuth";
 
@@ -428,6 +429,7 @@ export function ApiDocsPage() {
   const { user, regenerateKey } = useAuth();
   const [loginOpen,   setLoginOpen]   = useState(false);
   const [signupOpen,  setSignupOpen]  = useState(false);
+  const [forgotOpen,  setForgotOpen]  = useState(false);
   const [issued,      setIssued]      = useState<IssuedKey | null>(null);
   const [activeIdx,   setActiveIdx]   = useState<number | null>(null);
   const [regenLoading, setRegenLoading] = useState(false);
@@ -604,12 +606,18 @@ export function ApiDocsPage() {
         open={loginOpen}
         onClose={() => setLoginOpen(false)}
         onSwitchToSignup={() => setSignupOpen(true)}
+        onSwitchToForgotPwd={() => setForgotOpen(true)}
       />
       <SignupModal
         open={signupOpen}
         onClose={() => setSignupOpen(false)}
         onSuccess={onSignupSuccess}
         onSwitchToLogin={() => setLoginOpen(true)}
+      />
+      <ForgotPasswordModal
+        open={forgotOpen}
+        onClose={() => setForgotOpen(false)}
+        onSwitchToSignup={() => setSignupOpen(true)}
       />
       {issued && <KeyReveal issued={issued} onClose={() => setIssued(null)} />}
       {activeIdx !== null && (

@@ -13,6 +13,10 @@
 import { useCallback, useEffect, useState } from "react";
 
 const STORAGE_KEY = "omnesvident.auth";
+// Same-tab broadcast event — the native `storage` event only fires for
+// *other* tabs, so without this every useAuth() instance in the current tab
+// keeps its stale `user` state until the next mount.
+const AUTH_EVENT  = "omnesvident-auth-changed";
 const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
 
@@ -64,6 +68,12 @@ function writeAuth(user: AuthUser | null): void {
   } catch {
     /* localStorage unavailable (private mode); silently ignore */
   }
+  // Broadcast within the current tab so every useAuth() instance updates.
+  try {
+    window.dispatchEvent(new CustomEvent(AUTH_EVENT));
+  } catch {
+    /* SSR / CustomEvent unsupported */
+  }
 }
 
 export function initialsOf(name: string): string {
@@ -76,13 +86,20 @@ export function initialsOf(name: string): string {
 export function useAuth() {
   const [user, setUser] = useState<AuthUser | null>(readAuth);
 
-  // Cross-tab sync: when the user logs in/out in another tab, mirror it here.
+  // Sync this hook instance with localStorage in two cases:
+  //   1. cross-tab updates  → native `storage` event
+  //   2. same-tab updates   → our custom AUTH_EVENT (dispatched by writeAuth)
   useEffect(() => {
+    const onChange = () => setUser(readAuth());
     const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY) setUser(readAuth());
+      if (e.key === STORAGE_KEY) onChange();
     };
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener(AUTH_EVENT, onChange);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(AUTH_EVENT, onChange);
+    };
   }, []);
 
   const login = useCallback(async (email: string, password: string): Promise<AuthUser> => {

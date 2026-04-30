@@ -335,6 +335,92 @@ async def set_password(email: str, password: str) -> bool:
     return True
 
 
+# ─── Password-reset tokens ───────────────────────────────────────────────────
+# A "reset token" is a one-time URL-safe random string stored on the user's
+# Firestore doc. We do NOT hash it (it's already a random secret); we just
+# look users up by exact match. The companion `reset_password_expires_at`
+# timestamp gives us a 1-hour window after which the token is dead even if
+# never used.
+
+def generate_reset_token() -> str:
+    """Return a 256-bit URL-safe random token (~43 chars)."""
+    return secrets.token_urlsafe(32)
+
+
+async def set_reset_token(email: str, token: str, expires_at: datetime) -> bool:
+    """Store (or rotate) a fresh reset token on the user's record.
+
+    Overwriting any prior token is intentional — only the most-recent
+    forgot-password request should produce a working link.
+    """
+    client = _get_client()
+    if client is None:
+        return False
+    user = await get_user_by_email(email)
+    if not user:
+        return False
+    key_hash = user["api_key_hash"]
+    await client.collection(_USERS_COLLECTION).document(key_hash).update({
+        "reset_password_hash":       token,
+        "reset_password_expires_at": expires_at,
+    })
+    _CACHE.pop(key_hash, None)
+    return True
+
+
+async def get_user_by_reset_token(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Look up a user by their `reset_password_hash`. Returns None when the
+    token is missing, the document is unknown, the user is revoked, or the
+    expiry timestamp has already passed.
+    """
+    if not token:
+        return None
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        snap = (
+            client.collection(_USERS_COLLECTION)
+            .where("reset_password_hash", "==", token)
+            .limit(1)
+            .stream()
+        )
+        async for doc in snap:
+            data = _coerce_user(doc.to_dict() or {})
+            if data.get("revoked"):
+                return None
+            exp = data.get("reset_password_expires_at")
+            if exp is None:
+                return None
+            # Firestore returns timezone-aware datetimes; defensive coerce.
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp < datetime.now(tz=timezone.utc):
+                return None
+            return data
+    except Exception as exc:
+        logger.error("get_user_by_reset_token failed: %s", exc)
+    return None
+
+
+async def clear_reset_token(email: str) -> bool:
+    """Wipe both the hash and the expiry — call after a successful reset."""
+    client = _get_client()
+    if client is None:
+        return False
+    user = await get_user_by_email(email)
+    if not user:
+        return False
+    key_hash = user["api_key_hash"]
+    await client.collection(_USERS_COLLECTION).document(key_hash).update({
+        "reset_password_hash":       None,
+        "reset_password_expires_at": None,
+    })
+    _CACHE.pop(key_hash, None)
+    return True
+
+
 async def rotate_api_key(email: str) -> Optional[Dict[str, Any]]:
     """
     Issue a new API key for an existing user, replacing the old one.

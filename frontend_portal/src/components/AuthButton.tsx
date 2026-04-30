@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { accessLevelLabel, initialsOf, useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
 import { LoginModal } from "./LoginModal";
 import { SignupModal } from "./SignupModal";
+import { ForgotPasswordModal } from "./ForgotPasswordModal";
 
 /**
  * AuthButton — when logged out, renders a "Log in" pill.
@@ -20,14 +22,40 @@ export function AuthButton() {
   const { theme, toggleTheme } = useTheme();
   const [loginOpen,   setLoginOpen]   = useState(false);
   const [signupOpen,  setSignupOpen]  = useState(false);
+  const [forgotOpen,  setForgotOpen]  = useState(false);
   const [menuOpen,    setMenuOpen]    = useState(false);
+  const [menuPos,     setMenuPos]     = useState({ top: 0, right: 0 });
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const avatarRef  = useRef<HTMLButtonElement>(null);
+
+  // Compute the dropdown's screen position from the avatar's bounding rect.
+  // We portal the menu to <body> (see render) so its z-index isn't trapped
+  // by any ancestor that creates a stacking context (e.g. the R3F canvas).
+  useEffect(() => {
+    if (!menuOpen) return;
+    const measure = () => {
+      const r = avatarRef.current?.getBoundingClientRect();
+      if (r) setMenuPos({ top: r.bottom + 8, right: window.innerWidth - r.right });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [menuOpen]);
 
   // Close the avatar menu when clicking outside or pressing Escape
   useEffect(() => {
     if (!menuOpen) return;
     const onPointer = (e: PointerEvent) => {
-      if (!wrapperRef.current?.contains(e.target as Node)) setMenuOpen(false);
+      const target = e.target as Node;
+      // Allow clicks inside the avatar button OR the portaled menu.
+      const inAvatar = wrapperRef.current?.contains(target);
+      const menuEl   = document.getElementById("auth-menu-portal");
+      const inMenu   = menuEl?.contains(target);
+      if (!inAvatar && !inMenu) setMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuOpen(false); };
     window.addEventListener("pointerdown", onPointer);
@@ -54,12 +82,18 @@ export function AuthButton() {
           open={loginOpen}
           onClose={() => setLoginOpen(false)}
           onSwitchToSignup={() => setSignupOpen(true)}
+          onSwitchToForgotPwd={() => setForgotOpen(true)}
         />
         <SignupModal
           open={signupOpen}
           onClose={() => setSignupOpen(false)}
           onSwitchToLogin={() => setLoginOpen(true)}
           onSuccess={() => setSignupOpen(false)}
+        />
+        <ForgotPasswordModal
+          open={forgotOpen}
+          onClose={() => setForgotOpen(false)}
+          onSwitchToSignup={() => setSignupOpen(true)}
         />
       </>
     );
@@ -86,9 +120,82 @@ export function AuthButton() {
 
   const isLight = theme === "light";
 
+  // Dropdown content — extracted so we can portal it to <body> and escape
+  // any ancestor stacking context (e.g. the R3F canvas).
+  const menu = menuOpen ? (
+    <div
+      id="auth-menu-portal"
+      role="menu"
+      style={{
+        position: "fixed",
+        top:    menuPos.top,
+        right:  menuPos.right,
+        zIndex: 9999,
+      }}
+      className="w-60 rounded-lg border border-rim bg-base shadow-2xl shadow-black/40 overflow-hidden"
+    >
+      {/* Identity panel — name, email, access-level chips */}
+      <div className="px-3 py-2.5 border-b border-rim">
+        <p className="text-xs font-semibold truncate" style={{ color: "var(--color-text)" }}>
+          {user.name}
+        </p>
+        <p className="text-[10px] text-slate-500 font-mono truncate">{user.email}</p>
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {levels.map((lvl) => (
+            <span
+              key={lvl}
+              className={`text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded border ${tierColor(lvl)}`}
+            >
+              {accessLevelLabel(lvl)}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Theme toggle row */}
+      <button
+        onClick={toggleTheme}
+        className="flex items-center justify-between w-full px-3 py-2 text-xs hover:bg-panel transition-colors border-b border-rim"
+        role="menuitemcheckbox"
+        aria-checked={isLight}
+      >
+        <span className="flex items-center gap-2" style={{ color: "var(--color-text)" }}>
+          <span aria-hidden="true">{isLight ? "☀" : "☾"}</span>
+          {isLight ? "Light theme" : "Dark theme"}
+        </span>
+
+        {/* Toggle pill */}
+        <span
+          aria-hidden="true"
+          className={`relative inline-flex items-center w-9 h-5 rounded-full border transition-colors ${
+            isLight
+              ? "bg-amber-300/40 border-amber-400/50"
+              : "bg-slate-700/50 border-slate-500/40"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 w-4 h-4 rounded-full transition-transform ${
+              isLight
+                ? "left-0.5 translate-x-4 bg-amber-300"
+                : "left-0.5 translate-x-0 bg-slate-300"
+            }`}
+          />
+        </span>
+      </button>
+
+      <button
+        onClick={() => { setMenuOpen(false); logout(); }}
+        className="block w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+      >
+        Log out
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div ref={wrapperRef} className="relative">
       <button
+        ref={avatarRef}
         onClick={() => setMenuOpen((p) => !p)}
         className={`flex items-center justify-center w-7 h-7 rounded-full text-[10px] font-bold uppercase tracking-wider transition-shadow ${avatarTheme}`}
         aria-haspopup="menu"
@@ -98,68 +205,7 @@ export function AuthButton() {
         {initialsOf(user.name)}
       </button>
 
-      {menuOpen && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full mt-2 z-50 w-60 rounded-lg border border-rim bg-base shadow-2xl shadow-black/40 overflow-hidden"
-        >
-          {/* Identity panel — name, email, access-level chips */}
-          <div className="px-3 py-2.5 border-b border-rim">
-            <p className="text-xs font-semibold truncate" style={{ color: "var(--color-text)" }}>
-              {user.name}
-            </p>
-            <p className="text-[10px] text-slate-500 font-mono truncate">{user.email}</p>
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {levels.map((lvl) => (
-                <span
-                  key={lvl}
-                  className={`text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded border ${tierColor(lvl)}`}
-                >
-                  {accessLevelLabel(lvl)}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* Theme toggle row */}
-          <button
-            onClick={toggleTheme}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs hover:bg-panel transition-colors border-b border-rim"
-            role="menuitemcheckbox"
-            aria-checked={isLight}
-          >
-            <span className="flex items-center gap-2" style={{ color: "var(--color-text)" }}>
-              <span aria-hidden="true">{isLight ? "☀" : "☾"}</span>
-              {isLight ? "Light theme" : "Dark theme"}
-            </span>
-
-            {/* Toggle pill */}
-            <span
-              aria-hidden="true"
-              className={`relative inline-flex items-center w-9 h-5 rounded-full border transition-colors ${
-                isLight
-                  ? "bg-amber-300/40 border-amber-400/50"
-                  : "bg-slate-700/50 border-slate-500/40"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 w-4 h-4 rounded-full transition-transform ${
-                  isLight
-                    ? "left-0.5 translate-x-4 bg-amber-300"
-                    : "left-0.5 translate-x-0 bg-slate-300"
-                }`}
-              />
-            </span>
-          </button>
-
-          <button
-            onClick={() => { setMenuOpen(false); logout(); }}
-            className="block w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
-          >
-            Log out
-          </button>
-        </div>
-      )}
+      {menu && createPortal(menu, document.body)}
     </div>
   );
 }

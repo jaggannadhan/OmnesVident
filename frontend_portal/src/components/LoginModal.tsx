@@ -6,10 +6,13 @@ import { PasswordInput } from "./PasswordInput";
 interface LoginModalProps {
   open:         boolean;
   onClose:      () => void;
-  onSwitchToSignup?: () => void;
+  onSwitchToSignup?:    () => void;
+  onSwitchToForgotPwd?: () => void;
 }
 
-export function LoginModal({ open, onClose, onSwitchToSignup }: LoginModalProps) {
+export function LoginModal({
+  open, onClose, onSwitchToSignup, onSwitchToForgotPwd,
+}: LoginModalProps) {
   const { login } = useAuth();
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
@@ -126,6 +129,23 @@ export function LoginModal({ open, onClose, onSwitchToSignup }: LoginModalProps)
               onFocus={(e) => (e.target.style.borderColor = "rgba(34,211,238,0.5)")}
               onBlur={(e)  => (e.target.style.borderColor = "rgba(148,163,184,0.18)")}
             />
+            {onSwitchToForgotPwd && (
+              <button
+                type="button"
+                onClick={() => { onClose(); onSwitchToForgotPwd(); }}
+                style={{
+                  alignSelf: "flex-end",
+                  marginTop: "2px",
+                  background: "none", border: "none", padding: 0,
+                  fontSize: "10px",
+                  color: "#94a3b8",
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                Forgot password?
+              </button>
+            )}
           </label>
 
           {error && (

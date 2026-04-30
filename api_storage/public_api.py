@@ -24,6 +24,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -32,12 +33,17 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from api_storage.api_users import (
+    clear_reset_token,
     create_user,
+    generate_reset_token,
     get_user_by_email,
     get_user_by_key_hash,
+    get_user_by_reset_token,
     hash_api_key,
     has_unlimited_access,
     rotate_api_key,
+    set_password,
+    set_reset_token,
     verify_credentials,
 )
 from api_storage.login_throttle import (
@@ -45,6 +51,8 @@ from api_storage.login_throttle import (
     record_failure as record_login_failure,
     record_success as record_login_success,
 )
+from api_storage import forgot_password_throttle
+from api_storage.mailer import render_reset_password_email, send_email
 from api_storage.rate_limiter import limiter
 from api_storage.schemas import PaginatedStoriesResponse, StoryOut
 from api_storage import session_tokens
@@ -180,6 +188,45 @@ class LoginResponse(BaseModel):
         None,
         description="Bearer token for user-action endpoints (regenerate-key, etc.)."
     )
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    ok:      bool
+    message: str
+
+
+class ResetPasswordValidateResponse(BaseModel):
+    valid: bool
+    email: Optional[str] = None
+    name:  Optional[str] = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token:    str = Field(..., min_length=10, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def _password_complexity(cls, v: str) -> str:
+        # Same rules as signup — defence-in-depth.
+        if not re.search(r"[A-Z]",        v):
+            raise ValueError("Password must contain at least one uppercase letter.")
+        if not re.search(r"[a-z]",        v):
+            raise ValueError("Password must contain at least one lowercase letter.")
+        if not re.search(r"\d",           v):
+            raise ValueError("Password must contain at least one number.")
+        if not re.search(r"[^A-Za-z0-9]", v):
+            raise ValueError("Password must contain at least one special character.")
+        return v
+
+
+class ResetPasswordResponse(BaseModel):
+    ok:      bool
+    message: str
 
 
 class RegenerateKeyResponse(BaseModel):
@@ -321,6 +368,136 @@ async def regenerate_key(
         email=rotated["email"],
         api_key=rotated["api_key"],
         api_key_prefix=rotated["api_key_prefix"],
+    )
+
+
+# ─── Routes — password reset ────────────────────────────────────────────────
+
+# Frontend base URL — used to build the absolute /reset-password/<hash> link
+# we paste into the email body. Configurable so dev / preview environments
+# can override.
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://frontendportal-nine.vercel.app")
+RESET_TOKEN_TTL_HOURS = 1
+
+
+@router.post("/auth/forgot-password", response_model=ForgotPasswordResponse)
+async def forgot_password(req: ForgotPasswordRequest):
+    """
+    Send a password-reset email to the user.
+
+    Behaviour:
+      • throttled (3 / 15 min per email) — returns 429 once exceeded
+      • returns 404 if the email isn't registered (per product spec —
+        the UI shows a sign-up link in that case)
+      • on success, mints a one-time URL-safe token, persists it on the
+        user's Firestore doc with a 1-hour expiry, and emails the link
+    """
+    email_lc = str(req.email).strip().lower()
+
+    retry = forgot_password_throttle.check_allowed(email_lc)
+    if retry > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many reset requests. Try again in {retry}s.",
+            headers={"Retry-After": str(retry)},
+        )
+
+    user = await get_user_by_email(email_lc)
+    if not user:
+        # Per product decision: tell the user this email isn't registered so
+        # they can be redirected to signup. (Trades email-enumeration privacy
+        # for clearer UX.)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Oops, you haven't signed up to OmnesVident yet! Please sign up.",
+        )
+
+    token = generate_reset_token()
+    expires_at = datetime.now(tz=timezone.utc) + timedelta(hours=RESET_TOKEN_TTL_HOURS)
+    stored = await set_reset_token(email_lc, token, expires_at)
+    if not stored:
+        logger.error("forgot_password: failed to persist reset token for %s", email_lc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not initiate password reset. Try again shortly.",
+        )
+
+    forgot_password_throttle.record(email_lc)
+
+    reset_url = f"{FRONTEND_BASE_URL.rstrip('/')}/reset-password/{token}"
+    subject, html_body, text_body = render_reset_password_email(
+        name=user.get("name", "there"),
+        email=email_lc,
+        reset_url=reset_url,
+    )
+    ok, err = await send_email(
+        to_email=email_lc,
+        to_name=user.get("name", email_lc.split("@", 1)[0]),
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body,
+    )
+    if not ok:
+        logger.error("forgot_password: mail send failed for %s — %s", email_lc, err)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not send the reset email. Try again shortly.",
+        )
+
+    return ForgotPasswordResponse(
+        ok=True,
+        message="A password reset link has been sent to your inbox. The link is valid for 60 min.",
+    )
+
+
+@router.get("/auth/reset-password/{token}", response_model=ResetPasswordValidateResponse)
+async def validate_reset_token(token: str):
+    """
+    Pre-flight check — does this reset token still resolve to a non-expired
+    user record? Lets the frontend show "This link is invalid or expired"
+    immediately on page load instead of after the user fills in the form.
+    """
+    if len(token) < 10 or len(token) > 128:
+        return ResetPasswordValidateResponse(valid=False)
+    user = await get_user_by_reset_token(token)
+    if not user:
+        return ResetPasswordValidateResponse(valid=False)
+    return ResetPasswordValidateResponse(
+        valid=True,
+        email=user.get("email"),
+        name=user.get("name"),
+    )
+
+
+@router.post("/auth/reset-password", response_model=ResetPasswordResponse)
+async def reset_password(req: ResetPasswordRequest):
+    """
+    Apply a new password using a valid reset token.
+
+    On success:
+      1. password_hash is updated (bcrypt)
+      2. reset_password_hash + reset_password_expires_at are wiped
+         → the same link cannot be used a second time
+    """
+    user = await get_user_by_reset_token(req.token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This link is invalid or expired. Request a new one.",
+        )
+
+    email_lc = user["email"]
+    pw_set = await set_password(email_lc, req.password)
+    if not pw_set:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not save the new password. Try again shortly.",
+        )
+    await clear_reset_token(email_lc)
+
+    return ResetPasswordResponse(
+        ok=True,
+        message="Password updated. You can now log in with your new password.",
     )
 
 
