@@ -218,11 +218,29 @@ export function GlobeControls({ onChange }: GlobeControlsProps) {
   }
 
   // ─── Trigger label ─────────────────────────────────────────────────────────
+  // For the custom preset we show the actual From / To range so the user
+  // doesn't have to open the dropdown to remember what's filtered.
+  // Examples:  "29 Apr"  (single day)
+  //            "26 Apr → 30 Apr"  (range)
+  function formatShortDate(yyyy_mm_dd: string): string {
+    return new Date(`${yyyy_mm_dd}T00:00:00`).toLocaleDateString(undefined, {
+      day: "numeric", month: "short",
+    });
+  }
+
+  let customLabel = "Custom";
+  if (activePreset === "custom" && customFrom) {
+    const from = formatShortDate(customFrom);
+    customLabel = (toEnabled && customTo)
+      ? `${from} → ${formatShortDate(customTo)}`
+      : from;
+  }
+
   const activeLabel =
     activePreset === "today"  ? "Today"  :
     activePreset === "week"   ? "Week"   :
     activePreset === "month"  ? "Month"  :
-                                "Custom" ;
+                                customLabel;
 
   const oldestDateStr = coverage?.oldest ? toDateInputValue(coverage.oldest) : undefined;
   const todayStr = toDateInputValue(new Date().toISOString());

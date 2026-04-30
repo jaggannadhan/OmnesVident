@@ -4,7 +4,7 @@ import { SignupModal } from "./SignupModal";
 import { LoginModal } from "./LoginModal";
 import { ForgotPasswordModal } from "./ForgotPasswordModal";
 import { AuthButton } from "./AuthButton";
-import { useAuth } from "../hooks/useAuth";
+import { hasUnlimitedAccess, useAuth } from "../hooks/useAuth";
 
 const API_BASE_PUBLIC =
   ((import.meta.env.VITE_API_BASE_URL as string | undefined) ??
@@ -538,10 +538,45 @@ export function ApiDocsPage() {
             </p>
           )}
 
-          <p style={{ marginTop: "16px", fontSize: "11px", color: "#64748b", lineHeight: 1.55 }}>
-            Community tier: <strong style={{ color: "#cbd5e1" }}>5 requests / minute</strong>.
-            Need more? Contact us about partner access.
-          </p>
+          {(() => {
+            // Tier-aware blurb. Logged-out / basic users see the marketing
+            // copy with the partner-access CTA; logged-in users see what
+            // their actual tier grants them.
+            const levels    = user?.access_levels ?? [];
+            const unlimited = hasUnlimitedAccess(levels);
+            const isPremium = levels.includes("premium");
+
+            const baseStyle: React.CSSProperties = {
+              marginTop: "16px", fontSize: "11px", color: "#64748b", lineHeight: 1.55,
+            };
+
+            if (unlimited) {
+              const tierName = levels.includes("admin") ? "Admin" : "Super-user";
+              return (
+                <p style={baseStyle}>
+                  {tierName} access:{" "}
+                  <strong style={{ color: "#fbbf24" }}>unlimited requests</strong>.
+                  No rate limit applies to your key.
+                </p>
+              );
+            }
+            if (isPremium) {
+              return (
+                <p style={baseStyle}>
+                  Premium tier:{" "}
+                  <strong style={{ color: "#e879f9" }}>elevated rate limits</strong>.
+                  See your account for the exact quota.
+                </p>
+              );
+            }
+            // Basic / logged-out → community marketing copy
+            return (
+              <p style={baseStyle}>
+                Community tier: <strong style={{ color: "#cbd5e1" }}>5 requests / minute</strong>.
+                Need more? Contact us about partner access.
+              </p>
+            );
+          })()}
         </header>
 
         {/* Auth section */}
