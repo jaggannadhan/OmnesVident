@@ -42,6 +42,26 @@ html.light {
     transition: background-color 0.18s ease, color 0.18s ease;
   }
 
+  /* App-wide text-selection lockdown — gives the page a native-app feel and
+     prevents the user from accidentally highlighting story titles, sidebar
+     labels, etc. while interacting with the globe / cards. */
+  html, body {
+    -webkit-user-select: none;
+    -moz-user-select:    none;
+    -ms-user-select:     none;
+    user-select:         none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* …but form controls and explicitly editable regions must still allow
+     selection — otherwise typing in inputs would be impossible on some
+     browsers that inherit user-select to their internal text. */
+  input, textarea, [contenteditable], [contenteditable="true"] {
+    -webkit-user-select: text;
+    -moz-user-select:    text;
+    -ms-user-select:     text;
+    user-select:         text;
+  }
+
   ::-webkit-scrollbar {
     @apply w-1.5;
   }
