@@ -132,11 +132,15 @@ def get_latest_news(
     Return (stories, total_count) ordered by timestamp descending.
 
     Region filter matches:
-      - The primary region_code column (exact match), OR
-      - The mentioned_regions_json column (JSON array contains the code).
+      - The primary region_code column (exact match on the user-supplied
+        code OR any of its sub-region codes — e.g. IN also matches IN-TN,
+        IN-MH, …), OR
+      - The mentioned_regions_json column (JSON array contains the
+        user-supplied country code).
 
-    This dual-match enables cross-regional story discovery: a UK story
-    about Japan is returned when filtering by both GB and JP.
+    This combination enables three styles of regional discovery in one
+    query: country-level feeds, state-level feeds, and cross-regional
+    mentions (a UK story about Japan is returned when filtering by JP).
 
     start_date / end_date filter by story timestamp (inclusive on both ends).
     """
@@ -146,9 +150,15 @@ def get_latest_news(
         query = query.where(StoryRecord.category == category.upper())
 
     if region:
+        from database.regions import expand_region_code
         region_upper = region.upper()
+        codes = expand_region_code(region_upper)
+        if len(codes) > 1:
+            code_clause = StoryRecord.region_code.in_(codes)
+        else:
+            code_clause = StoryRecord.region_code == codes[0]
         query = query.where(
-            (StoryRecord.region_code == region_upper)
+            code_clause
             | StoryRecord.mentioned_regions_json.contains(f'"{region_upper}"')
         )
 

@@ -359,10 +359,19 @@ class FirestoreManager:
 
         try:
             from google.cloud import firestore  # type: ignore
+            from .regions import expand_region_code
 
             q = client.collection(_MASTER_COLLECTION)
             if region_code:
-                q = q.where("region_code", "==", region_code.upper())
+                # Include the country code AND every sub-region we ingest under
+                # it ("IN" → "IN", "IN-TN", "IN-MH", …) so picking a country in
+                # the UI captures state-level stories too. `in` supports up to
+                # 30 values; our largest country has 16 (US: country + 15 states).
+                codes = expand_region_code(region_code)
+                if len(codes) > 1:
+                    q = q.where("region_code", "in", codes)
+                else:
+                    q = q.where("region_code", "==", codes[0])
             if category:
                 q = q.where("category", "==", category.upper())
             if start_dt:
@@ -406,9 +415,17 @@ class FirestoreManager:
             return -1
 
         try:
+            from .regions import expand_region_code
+
             q = client.collection(_MASTER_COLLECTION)
             if region_code:
-                q = q.where("region_code", "==", region_code.upper())
+                # Mirror the expansion in query_master_by_timestamp so the
+                # count matches the result-set the user actually paginates.
+                codes = expand_region_code(region_code)
+                if len(codes) > 1:
+                    q = q.where("region_code", "in", codes)
+                else:
+                    q = q.where("region_code", "==", codes[0])
             if category:
                 q = q.where("category", "==", category.upper())
             if start_dt:
