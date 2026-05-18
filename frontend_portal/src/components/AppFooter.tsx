@@ -5,9 +5,8 @@ import { CATEGORY_META } from "./NewsCard";
 // a category jumps the user back to the top of the feed with that category
 // pre-selected. Legal Protocols currently links to the Privacy Policy only.
 
-// Keep in sync with HeaderCategoryNav's ORDER — WORLD intentionally omitted
-// because "All Intel" already covers it.
-const CATEGORY_ORDER = ["POLITICS", "SCIENCE_TECH", "BUSINESS", "HEALTH", "ENTERTAINMENT", "SPORTS"];
+// Keep in sync with HeaderCategoryNav's ORDER.
+const CATEGORY_ORDER = ["WORLD", "POLITICS", "SCIENCE_TECH", "BUSINESS", "HEALTH", "ENTERTAINMENT", "SPORTS"];
 
 interface AppFooterProps {
   onCategorySelect?: (category: string | undefined) => void;

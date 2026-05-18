@@ -62,8 +62,11 @@ export function fetchNews({
   end_date,
 }: FetchNewsParams = {}): Promise<PaginatedStoriesResponse> {
   const params = new URLSearchParams();
-  // "WORLD" is the catch-all view — omit the filter so all stories are returned
-  if (category && category !== "WORLD") params.set("category", category);
+  // WORLD is a real category (the classifier's fallback bucket and where
+  // ~99% of stories live today), so we send it like any other value rather
+  // than treating it as "no filter". "All Intel" remains the way to clear
+  // the category filter — it passes `category` as undefined.
+  if (category) params.set("category", category);
   params.set("limit", String(limit));
   params.set("offset", String(offset));
   if (start_date) params.set("start_date", start_date);

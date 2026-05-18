@@ -4,9 +4,10 @@ import { CATEGORY_META } from "./NewsCard";
 // Clicking the active category, or the leading "ALL INTEL" link, clears
 // the selection. Active + hover states use the gold accent.
 
-// "All Intel" already includes world stories (it clears the category filter),
-// so we don't surface a separate "World" pill — keeping it would be redundant.
-const ORDER = ["POLITICS", "SCIENCE_TECH", "BUSINESS", "HEALTH", "ENTERTAINMENT", "SPORTS"];
+// "All Intel" clears the filter (mixed feed). WORLD is a real category and
+// happens to be the classifier's fallback bucket, so it holds most of the
+// catalog — exposing it explicitly lets users filter into that pool.
+const ORDER = ["WORLD", "POLITICS", "SCIENCE_TECH", "BUSINESS", "HEALTH", "ENTERTAINMENT", "SPORTS"];
 
 interface HeaderCategoryNavProps {
   selected: string | undefined;

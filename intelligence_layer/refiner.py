@@ -154,14 +154,40 @@ Script-hint rules (each story may carry a [script_hint=XX] tag):
   regional prior and rely on named entities to narrow it down.
 """
 
-_BREAKING_SYSTEM_PROMPT = """\
-You are a breaking-news classifier for a global news aggregation system.
+_ENRICH_SYSTEM_PROMPT = """\
+You are an enrichment classifier for a global news aggregation system.
 
 Given a numbered list of news story titles and snippets (always in English),
-assess each story for urgency, scale, and immediate public impact.
+assign three labels per story: a category, an is_breaking flag, and a
+heat_score 1–100.
 
 Return ONLY a valid JSON array with one object per story IN THE SAME ORDER as
-the input.  Each object must have exactly these keys:
+the input.  Each object must have exactly these three keys:
+
+  "category"    : exactly one of the canonical buckets below.  Pick the
+                  BEST single fit; do not invent new values.
+
+    "POLITICS"       — government, elections, legislation, diplomacy,
+                       sanctions, parties, geopolitical disputes, courts
+                       ruling on political matters
+    "SCIENCE_TECH"   — science, technology, AI / ML, software,
+                       cybersecurity, internet, space, biotech, research,
+                       big-tech company news (not their finances)
+    "BUSINESS"       — markets, earnings, corporate finance, trade, M&A,
+                       central banks, the economy, commodities, crypto as
+                       a market story
+    "HEALTH"         — medicine, public health, disease outbreaks,
+                       healthcare policy, drugs, mental health, hospitals
+    "ENTERTAINMENT"  — film, TV, music, celebrities, awards, gaming, arts
+                       and culture, sports OUTSIDE of competitive results
+                       (e.g. a player's personal life)
+    "SPORTS"         — competitive sports: leagues, tournaments, scores,
+                       transfers, athletes' on-field performance
+    "WORLD"          — international affairs, armed conflict, humanitarian
+                       crises, foreign relations, and ONLY stories that
+                       genuinely don't fit any bucket above.  Do NOT use
+                       WORLD as a catch-all — prefer a more specific
+                       category whenever the story plausibly fits one.
 
   "is_breaking" : true if the story qualifies as breaking news, false otherwise
   "heat_score"  : integer 1–100 representing urgency and impact
@@ -202,8 +228,8 @@ Rules:
 """
 
 
-def _build_breaking_prompt(stories: List[Dict[str, Any]]) -> str:
-    lines = ["Classify each story for breaking-news status:\n"]
+def _build_enrich_prompt(stories: List[Dict[str, Any]]) -> str:
+    lines = ["Classify each story (category, is_breaking, heat_score):\n"]
     for i, s in enumerate(stories, 1):
         lines.append(
             f"[{i}] title: {s.get('title', '')[:180]}"
@@ -452,22 +478,28 @@ class AIRefiner:
     # Keep legacy name so existing callers don't break
     _call_gemini = _call_geo
 
-    # ── Layer 4: breaking-news detection call ────────────────────────────────
+    # ── Layer 4: enrichment call (category + is_breaking + heat_score) ──────
 
-    async def _call_breaking(
+    async def _call_enrich(
         self, stories: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Call OpenAI gpt-4o-mini to classify each story as breaking news and
-        assign a heat_score 1–100.  Returns a list of dicts with
-        {"is_breaking": bool, "heat_score": int} per story.
-        Falls back to all-False/score-0 on any error.
+        Call OpenAI gpt-4o-mini to enrich each story with category,
+        is_breaking, and heat_score in a single round-trip. Returns a list
+        of dicts with {"category": str | None, "is_breaking": bool,
+        "heat_score": int} per story. Falls back to all-empty on error so
+        callers can substitute their own defaults (e.g. rules-based
+        classifier).
         """
+        from intelligence_layer.classifier import CATEGORIES
+        valid_cats = set(CATEGORIES)
+        empty = {"category": None, "is_breaking": False, "heat_score": 0}
+
         client = self._get_client()
         if client is None:
-            return [{"is_breaking": False, "heat_score": 0}] * len(stories)
+            return [dict(empty) for _ in stories]
 
-        prompt = _build_breaking_prompt(stories)
+        prompt = _build_enrich_prompt(stories)
         try:
             loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
@@ -477,25 +509,40 @@ class AIRefiner:
                     temperature=0,
                     max_tokens=1024,
                     messages=[
-                        {"role": "system", "content": _BREAKING_SYSTEM_PROMPT},
+                        {"role": "system", "content": _ENRICH_SYSTEM_PROMPT},
                         {"role": "user",   "content": prompt},
                     ],
                 ),
             )
             text    = response.choices[0].message.content or ""
             results = _parse_json(text)
+            # Pad if the LLM dropped any entries so the caller can rely on
+            # `len(results) == len(stories)`.
+            while len(results) < len(stories):
+                results.append(dict(empty))
             if len(results) != len(stories):
                 logger.warning(
-                    "AIRefiner._call_breaking: got %d results for %d stories.",
+                    "AIRefiner._call_enrich: got %d results for %d stories.",
                     len(results), len(stories),
                 )
-                # Pad or truncate to match story count
-                while len(results) < len(stories):
-                    results.append({"is_breaking": False, "heat_score": 0})
+
+            # Normalize category to the canonical taxonomy. Anything outside
+            # the seven canonical values gets dropped to None so the caller's
+            # rules-based fallback runs instead of trusting a hallucination.
+            for r in results:
+                cat = r.get("category")
+                if isinstance(cat, str):
+                    cat_upper = cat.strip().upper()
+                    r["category"] = cat_upper if cat_upper in valid_cats else None
+                else:
+                    r["category"] = None
             return results
         except Exception as exc:
-            logger.warning("AIRefiner._call_breaking: failed — %s", exc)
-            return [{"is_breaking": False, "heat_score": 0}] * len(stories)
+            logger.warning("AIRefiner._call_enrich: failed — %s", exc)
+            return [dict(empty) for _ in stories]
+
+    # Backwards-compat alias — older callers (and tests) may still import this.
+    _call_breaking = _call_enrich
 
     # ── Per-story geo resolution ──────────────────────────────────────────────
 
@@ -598,26 +645,31 @@ class AIRefiner:
             # Layer 1+2: detect scripts, translate non-English
             en_inputs = await self._translate_batch(raw_inputs)
 
-            # Layer 3: geo-resolve + Layer 4: breaking detection (concurrent)
-            ai_results, breaking_results = await asyncio.gather(
+            # Layer 3: geo-resolve + Layer 4: enrichment (concurrent)
+            ai_results, enrich_results = await asyncio.gather(
                 self._call_geo(en_inputs),
-                self._call_breaking(en_inputs),
+                self._call_enrich(en_inputs),
             )
             while len(ai_results) < len(batch):
                 ai_results.append({})
 
-            for doc, en_input, ai_result, brk_result in zip(batch, en_inputs, ai_results, breaking_results):
+            for doc, en_input, ai_result, enrich in zip(batch, en_inputs, ai_results, enrich_results):
                 doc_id = doc.get("_doc_id", "")
                 try:
                     region_code, lat, lng, confidence = await self._resolve(
                         en_input, ai_result, geo_cache
                     )
 
-                    # Classify using the (possibly translated) English text
-                    category = classify(en_input["title"], en_input.get("snippet", ""))
+                    # Prefer the LLM-assigned category; fall back to the
+                    # rules-based classifier if the LLM was unavailable or
+                    # returned an out-of-taxonomy value.
+                    category = (
+                        enrich.get("category")
+                        or classify(en_input["title"], en_input.get("snippet", ""))
+                    )
 
-                    is_breaking = bool(brk_result.get("is_breaking", False))
-                    heat_score  = int(max(0, min(100, brk_result.get("heat_score", 0) or 0)))
+                    is_breaking = bool(enrich.get("is_breaking", False))
+                    heat_score  = int(max(0, min(100, enrich.get("heat_score", 0) or 0)))
 
                     patch: Dict[str, Any] = {
                         "region_code":    region_code,
@@ -707,16 +759,17 @@ class AIRefiner:
             en_inputs = await self._translate_batch(raw_inputs)
 
             # Layer 3: geo-resolve on English text
-            # Layer 4: breaking-news detection (runs concurrently with geo)
-            ai_results, breaking_results = await asyncio.gather(
+            # Layer 4: enrichment (category + is_breaking + heat_score) — runs
+            # concurrently with geo so we pay one round-trip's latency for both.
+            ai_results, enrich_results = await asyncio.gather(
                 self._call_geo(en_inputs),
-                self._call_breaking(en_inputs),
+                self._call_enrich(en_inputs),
             )
             while len(ai_results) < len(batch):
                 ai_results.append({})
 
-            for doc, raw_input, en_input, ai_result, brk_result in zip(
-                batch, raw_inputs, en_inputs, ai_results, breaking_results
+            for doc, raw_input, en_input, ai_result, enrich in zip(
+                batch, raw_inputs, en_inputs, ai_results, enrich_results
             ):
                 doc_id = doc.get("_doc_id", "")
                 raw    = doc.get("raw_payload", {})
@@ -747,11 +800,14 @@ class AIRefiner:
                         failed_ids.append(doc_id)
                         continue
 
-                    category = classify(event.title, event.snippet)
+                    # Prefer LLM-assigned category; fall back to rules-based
+                    # when the LLM was unavailable or returned a value outside
+                    # the canonical taxonomy.
+                    category = enrich.get("category") or classify(event.title, event.snippet)
                     ts       = event.timestamp or datetime.now(tz=timezone.utc)
 
-                    is_breaking = bool(brk_result.get("is_breaking", False))
-                    heat_score  = int(max(0, min(100, brk_result.get("heat_score", 0) or 0)))
+                    is_breaking = bool(enrich.get("is_breaking", False))
+                    heat_score  = int(max(0, min(100, enrich.get("heat_score", 0) or 0)))
 
                     extra: Dict[str, Any] = {
                         "latitude":       lat,
