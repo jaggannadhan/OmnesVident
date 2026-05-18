@@ -39,9 +39,10 @@ interface GlobeWithCarouselProps {
   regionCode?: string;
   categories: string[];
   dateRange: DateRange;
+  globeOpen?: boolean;
 }
 
-function GlobeWithCarousel({ regionCode, categories, dateRange }: GlobeWithCarouselProps) {
+function GlobeWithCarousel({ regionCode, categories, dateRange, globeOpen = true }: GlobeWithCarouselProps) {
   const apiCategory = apiCategoryOf(categories);
   const { data } = useNews({
     region: regionCode,
@@ -53,37 +54,42 @@ function GlobeWithCarousel({ regionCode, categories, dateRange }: GlobeWithCarou
   const visible = applyCategoryFilter(data?.stories ?? [], categories);
   const breakingStories = visible.filter((s) => s.is_breaking);
 
+  // Nothing to render when both the globe is hidden and there are no breaking stories.
+  if (!globeOpen && breakingStories.length === 0) return null;
+
   return (
     <div style={{ display: "flex", gap: "12px", alignItems: "stretch", height: "480px" }}>
-      {/* Breaking News Carousel — left 30%, only when breaking stories exist */}
+      {/* Breaking News Carousel — 30% when globe is shown, full width when it's hidden. */}
       {breakingStories.length > 0 && (
-        <div style={{ flex: "0 0 30%", minWidth: 0 }}>
+        <div style={{ flex: globeOpen ? "0 0 30%" : "1 1 100%", minWidth: 0 }}>
           <BreakingNewsCarousel stories={breakingStories} />
         </div>
       )}
 
       {/* Globe — right 70%, or full width when no breaking stories */}
-      <div style={{ flex: breakingStories.length > 0 ? "0 0 70%" : "1 1 100%", minWidth: 0 }}>
-        <GlobeErrorBoundary>
-          <Suspense
-            fallback={
-              <div
-                className="w-full rounded-xl border border-rim bg-base flex items-center justify-center text-slate-600 text-xs font-mono"
-                style={{ height: "100%" }}
-              >
-                Loading 3D engine…
-              </div>
-            }
-          >
-            <GlobeScene
-              region={regionCode}
-              categories={categories}
-              startDate={dateRange.start}
-              endDate={dateRange.end}
-            />
-          </Suspense>
-        </GlobeErrorBoundary>
-      </div>
+      {globeOpen && (
+        <div style={{ flex: breakingStories.length > 0 ? "0 0 70%" : "1 1 100%", minWidth: 0 }}>
+          <GlobeErrorBoundary>
+            <Suspense
+              fallback={
+                <div
+                  className="w-full rounded-xl border border-rim bg-base flex items-center justify-center text-slate-600 text-xs font-mono"
+                  style={{ height: "100%" }}
+                >
+                  Loading 3D engine…
+                </div>
+              }
+            >
+              <GlobeScene
+                region={regionCode}
+                categories={categories}
+                startDate={dateRange.start}
+                endDate={dateRange.end}
+              />
+            </Suspense>
+          </GlobeErrorBoundary>
+        </div>
+      )}
     </div>
   );
 }
@@ -192,7 +198,7 @@ function FeedView() {
 
       <nav
         className={`
-          fixed top-0 left-0 z-50 h-full bg-[#161a1d] border-r border-rim
+          fixed top-0 left-0 z-50 h-full bg-panel border-r border-rim
           transform transition-all duration-200 ease-out overflow-hidden
           lg:relative lg:translate-x-0 lg:flex lg:flex-col lg:shrink-0
           ${sidebarOpen ? "translate-x-0 w-64" : "-translate-x-full w-64"}
@@ -298,16 +304,17 @@ function FeedView() {
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
           <div className="max-w-7xl mx-auto flex flex-col gap-5">
 
-            {/* 3D Globe + Breaking News Carousel — hidden on small screens, toggleable */}
-            {globeOpen && (
-              <div className="hidden md:block">
-                <GlobeWithCarousel
-                  regionCode={regionCode}
-                  categories={categories}
-                  dateRange={dateRange}
-                />
-              </div>
-            )}
+            {/* 3D Globe + Breaking News Carousel — hidden on small screens.
+                The globe toggle only hides the globe column; the carousel
+                stays and expands to full width when the globe is off. */}
+            <div className="hidden md:block">
+              <GlobeWithCarousel
+                regionCode={regionCode}
+                categories={categories}
+                dateRange={dateRange}
+                globeOpen={globeOpen}
+              />
+            </div>
 
             {/* Mobile-only: breaking news first, then tile-map navigator */}
             <div className="md:hidden flex flex-col gap-4">
