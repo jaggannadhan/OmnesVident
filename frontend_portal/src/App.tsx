@@ -39,10 +39,9 @@ interface GlobeWithCarouselProps {
   regionCode?: string;
   categories: string[];
   dateRange: DateRange;
-  globeOpen?: boolean;
 }
 
-function GlobeWithCarousel({ regionCode, categories, dateRange, globeOpen = true }: GlobeWithCarouselProps) {
+function GlobeWithCarousel({ regionCode, categories, dateRange }: GlobeWithCarouselProps) {
   const apiCategory = apiCategoryOf(categories);
   const { data } = useNews({
     region: regionCode,
@@ -54,42 +53,37 @@ function GlobeWithCarousel({ regionCode, categories, dateRange, globeOpen = true
   const visible = applyCategoryFilter(data?.stories ?? [], categories);
   const breakingStories = visible.filter((s) => s.is_breaking);
 
-  // Nothing to render when both the globe is hidden and there are no breaking stories.
-  if (!globeOpen && breakingStories.length === 0) return null;
-
   return (
     <div style={{ display: "flex", gap: "12px", alignItems: "stretch", height: "480px" }}>
-      {/* Breaking News Carousel — 30% when globe is shown, full width when it's hidden. */}
+      {/* Breaking News Carousel — left 30%, only when breaking stories exist */}
       {breakingStories.length > 0 && (
-        <div style={{ flex: globeOpen ? "0 0 30%" : "1 1 100%", minWidth: 0 }}>
+        <div style={{ flex: "0 0 30%", minWidth: 0 }}>
           <BreakingNewsCarousel stories={breakingStories} />
         </div>
       )}
 
       {/* Globe — right 70%, or full width when no breaking stories */}
-      {globeOpen && (
-        <div style={{ flex: breakingStories.length > 0 ? "0 0 70%" : "1 1 100%", minWidth: 0 }}>
-          <GlobeErrorBoundary>
-            <Suspense
-              fallback={
-                <div
-                  className="w-full rounded-xl border border-rim bg-base flex items-center justify-center text-slate-600 text-xs font-mono"
-                  style={{ height: "100%" }}
-                >
-                  Loading 3D engine…
-                </div>
-              }
-            >
-              <GlobeScene
-                region={regionCode}
-                categories={categories}
-                startDate={dateRange.start}
-                endDate={dateRange.end}
-              />
-            </Suspense>
-          </GlobeErrorBoundary>
-        </div>
-      )}
+      <div style={{ flex: breakingStories.length > 0 ? "0 0 70%" : "1 1 100%", minWidth: 0 }}>
+        <GlobeErrorBoundary>
+          <Suspense
+            fallback={
+              <div
+                className="w-full rounded-xl border border-rim bg-base flex items-center justify-center text-slate-600 text-xs font-mono"
+                style={{ height: "100%" }}
+              >
+                Loading 3D engine…
+              </div>
+            }
+          >
+            <GlobeScene
+              region={regionCode}
+              categories={categories}
+              startDate={dateRange.start}
+              endDate={dateRange.end}
+            />
+          </Suspense>
+        </GlobeErrorBoundary>
+      </div>
     </div>
   );
 }
@@ -146,7 +140,6 @@ function FeedView() {
   const [offset, setOffset] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [globeOpen, setGlobeOpen] = useState(true);
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     // Default: full day today (midnight → 23:59:59 local)
     const d = new Date();
@@ -283,18 +276,6 @@ function FeedView() {
               {"</> API"}
             </Link>
 
-            <button
-              onClick={() => setGlobeOpen((p) => !p)}
-              className={`hidden md:inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-md border transition-colors ${
-                globeOpen
-                  ? "border-cyan-500/40 text-cyan-400 bg-cyan-400/10"
-                  : "border-rim text-slate-500 hover:text-slate-300 hover:border-rim-bright"
-              }`}
-              title={globeOpen ? "Hide globe" : "Show globe"}
-            >
-              🌐 {globeOpen ? "Globe on" : "Globe off"}
-            </button>
-
             {/* Auth control — Log in pill when logged out, profile circle when logged in */}
             <AuthButton />
           </div>
@@ -304,15 +285,12 @@ function FeedView() {
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
           <div className="max-w-7xl mx-auto flex flex-col gap-5">
 
-            {/* 3D Globe + Breaking News Carousel — hidden on small screens.
-                The globe toggle only hides the globe column; the carousel
-                stays and expands to full width when the globe is off. */}
+            {/* 3D Globe + Breaking News Carousel — hidden on small screens */}
             <div className="hidden md:block">
               <GlobeWithCarousel
                 regionCode={regionCode}
                 categories={categories}
                 dateRange={dateRange}
-                globeOpen={globeOpen}
               />
             </div>
 
