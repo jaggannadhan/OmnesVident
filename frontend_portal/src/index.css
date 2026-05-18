@@ -87,6 +87,32 @@ html.light {
     opacity: 0.85;
     cursor: pointer;
   }
+
+  /* ─── Light-theme text legibility overrides ────────────────────────────
+     The UI was designed dark-first, so most components reach for the bright
+     end of Tailwind's slate ramp (text-white, text-slate-100…400) as their
+     primary / secondary text. On the light theme those colours blend into
+     the white surface. Re-map them here so we don't have to touch every
+     component file. Pairs are picked to preserve the same visual hierarchy
+     (primary → secondary → muted) just inverted onto a light background. */
+  html.light .text-white        { color: #0f172a; } /* slate-900 */
+  html.light .text-slate-100    { color: #0f172a; } /* slate-900 */
+  html.light .text-slate-200    { color: #1e293b; } /* slate-800 */
+  html.light .text-slate-300    { color: #334155; } /* slate-700 */
+  html.light .text-slate-400    { color: #475569; } /* slate-600 */
+  html.light .text-slate-500    { color: #64748b; } /* slate-500 — already mid-gray */
+  html.light .text-slate-600    { color: #475569; } /* slate-600 */
+
+  html.light .hover\:text-white:hover     { color: #0f172a; }
+  html.light .hover\:text-slate-100:hover { color: #0f172a; }
+  html.light .hover\:text-slate-200:hover { color: #1e293b; }
+  html.light .hover\:text-slate-300:hover { color: #334155; }
+  html.light .hover\:text-slate-400:hover { color: #475569; }
+
+  html.light .group:hover .group-hover\:text-slate-300,
+  html.light .group\/link:hover .group-hover\/link\:text-slate-300 {
+    color: #334155;
+  }
 }
 
 @layer utilities {
