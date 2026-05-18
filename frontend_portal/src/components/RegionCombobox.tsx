@@ -163,7 +163,7 @@ export function RegionCombobox({ selectedRegion, onSelect }: RegionComboboxProps
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search country or code…"
-          className="w-full bg-panel border border-rim rounded-md px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/40"
+          className="w-full bg-panel border border-rim rounded-md px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-brand/40"
         />
       </div>
 
@@ -175,7 +175,7 @@ export function RegionCombobox({ selectedRegion, onSelect }: RegionComboboxProps
             onClick={() => pick(undefined)}
             className={`flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs transition-colors ${
               !selectedRegion
-                ? "bg-cyan-400/10 text-cyan-400"
+                ? "bg-brand/10 text-brand"
                 : "text-slate-300 hover:bg-panel"
             }`}
           >
@@ -229,7 +229,7 @@ export function RegionCombobox({ selectedRegion, onSelect }: RegionComboboxProps
         className={`flex items-center gap-2 w-full text-left rounded-lg px-2.5 py-2 text-xs transition-all duration-150 border ${
           selectedRegion
             ? "bg-slate-700/50 text-white border-slate-500/50"
-            : "bg-cyan-400/10 text-cyan-400 border-cyan-400/30"
+            : "bg-brand/10 text-brand border-brand/30"
         }`}
         aria-haspopup="listbox"
         aria-expanded={open}

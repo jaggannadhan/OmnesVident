@@ -114,7 +114,7 @@ export interface GlobeControlsProps {
 
 export function GlobeControls({ onChange }: GlobeControlsProps) {
   const [coverage, setCoverage] = useState<Coverage | null>(null);
-  const [activePreset, setActivePreset] = useState<PresetKey>("today");
+  const [activePreset, setActivePreset] = useState<PresetKey>("month");
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
@@ -246,7 +246,7 @@ export function GlobeControls({ onChange }: GlobeControlsProps) {
   const todayStr = toDateInputValue(new Date().toISOString());
 
   const badgeBase   = "text-[10px] font-mono px-2.5 py-1 rounded-md border transition-colors text-left";
-  const badgeActive = "border-cyan-500/60 text-cyan-300 bg-cyan-400/10";
+  const badgeActive = "border-brand/60 text-brand bg-brand/10";
   const badgeIdle   = "border-rim text-slate-400 hover:text-slate-200 hover:border-rim-bright";
 
   const dropdown = dropdownOpen ? createPortal(
@@ -298,7 +298,7 @@ export function GlobeControls({ onChange }: GlobeControlsProps) {
               min={oldestDateStr}
               max={toEnabled && customTo ? customTo : todayStr}
               onChange={(e) => handleFromChange(e.target.value)}
-              className="text-[11px] font-mono bg-slate-800/60 border border-rim rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-500/60 focus:text-cyan-300 cursor-pointer w-full"
+              className="text-[11px] font-mono bg-slate-800/60 border border-rim rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-brand/60 focus:text-brand cursor-pointer w-full"
             />
           </div>
 
@@ -307,7 +307,7 @@ export function GlobeControls({ onChange }: GlobeControlsProps) {
               type="checkbox"
               checked={toEnabled}
               onChange={(e) => handleToEnabledChange(e.target.checked)}
-              className="accent-cyan-400 w-3 h-3 cursor-pointer"
+              className="accent-brand w-3 h-3 cursor-pointer"
             />
             <span className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">
               Set end date
@@ -321,13 +321,13 @@ export function GlobeControls({ onChange }: GlobeControlsProps) {
               min={customFrom || oldestDateStr}
               max={todayStr}
               onChange={(e) => handleToChange(e.target.value)}
-              className="text-[11px] font-mono bg-slate-800/60 border border-rim rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-500/60 focus:text-cyan-300 cursor-pointer w-full"
+              className="text-[11px] font-mono bg-slate-800/60 border border-rim rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-brand/60 focus:text-brand cursor-pointer w-full"
             />
           )}
 
           <button
             onClick={() => setDropdownOpen(false)}
-            className="self-end mt-1 text-[10px] font-semibold uppercase tracking-wider text-cyan-400 hover:text-cyan-200 transition-colors"
+            className="self-end mt-1 text-[10px] font-semibold uppercase tracking-wider text-brand hover:opacity-80 transition-opacity"
           >
             Apply ✓
           </button>
@@ -357,8 +357,8 @@ export function GlobeControls({ onChange }: GlobeControlsProps) {
         title={`Date filter — currently ${activeLabel}`}
         className={`flex items-center gap-2 w-full text-left rounded-lg px-2.5 py-2 text-xs transition-all duration-150 border ${
           dropdownOpen
-            ? "bg-cyan-400/10 text-cyan-300 border-cyan-400/40"
-            : "bg-cyan-400/10 text-cyan-400 border-cyan-400/30"
+            ? "bg-brand/10 text-brand border-brand/40"
+            : "bg-brand/10 text-brand border-brand/30"
         }`}
       >
         <span className="text-sm leading-none w-4 text-center shrink-0" aria-hidden="true">📅</span>

@@ -72,7 +72,7 @@ export function AuthButton() {
       <>
         <button
           onClick={() => setLoginOpen(true)}
-          className="text-[10px] font-semibold uppercase tracking-widest px-2.5 py-1 rounded-md border border-cyan-500/40 text-cyan-300 hover:text-cyan-200 hover:bg-cyan-400/10 transition-colors"
+          className="text-[10px] font-semibold uppercase tracking-widest px-2.5 py-1 rounded-md border border-brand/50 text-brand hover:bg-brand/10 transition-colors"
           aria-label="Log in"
         >
           Log in
@@ -110,13 +110,13 @@ export function AuthButton() {
     ? "bg-gradient-to-br from-amber-400 to-orange-500 text-slate-900 shadow-[0_0_10px_rgba(251,191,36,0.45)]"
     : levels.includes("premium")
     ? "bg-gradient-to-br from-fuchsia-400 to-violet-500 text-slate-900 shadow-[0_0_10px_rgba(217,70,239,0.45)]"
-    : "bg-gradient-to-br from-cyan-400 to-violet-500 text-slate-900 shadow-[0_0_10px_rgba(167,139,250,0.45)]";
+    : "bg-gradient-to-br from-brand to-violet-700 text-white shadow-[0_0_10px_rgba(167,139,250,0.45)]";
 
   const tierColor = (lvl: string) =>
     lvl === "admin"      ? "text-rose-300 bg-rose-400/10 border-rose-400/30" :
     lvl === "super_user" ? "text-amber-300 bg-amber-400/10 border-amber-400/30" :
     lvl === "premium"    ? "text-fuchsia-300 bg-fuchsia-400/10 border-fuchsia-400/30" :
-                           "text-cyan-300 bg-cyan-400/10 border-cyan-400/30";
+                           "text-brand bg-brand/10 border-brand/30";
 
   const isLight = theme === "light";
 

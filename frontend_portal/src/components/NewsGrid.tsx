@@ -7,22 +7,22 @@ import { NewsCard } from "./NewsCard";
 
 function SkeletonCard() {
   return (
-    <div className="flex flex-col gap-3 rounded-xl bg-card border border-rim p-4 animate-pulse">
+    <div className="flex flex-col gap-3 border border-rim p-6 animate-pulse">
       <div className="flex justify-between">
-        <div className="h-2.5 w-24 rounded bg-rim" />
-        <div className="h-2.5 w-12 rounded bg-rim" />
+        <div className="h-3 w-24 bg-rim" />
+        <div className="h-3 w-16 bg-rim" />
+      </div>
+      <div className="space-y-2 pt-1">
+        <div className="h-5 w-full bg-rim" />
+        <div className="h-5 w-4/5 bg-rim" />
       </div>
       <div className="space-y-1.5">
-        <div className="h-3 w-full rounded bg-rim" />
-        <div className="h-3 w-4/5 rounded bg-rim" />
+        <div className="h-3 w-full bg-rim/60" />
+        <div className="h-3 w-3/4 bg-rim/60" />
       </div>
-      <div className="space-y-1">
-        <div className="h-2.5 w-full rounded bg-rim/60" />
-        <div className="h-2.5 w-3/4 rounded bg-rim/60" />
-      </div>
-      <div className="flex gap-1.5 pt-1 border-t border-rim/50">
-        <div className="h-4 w-16 rounded bg-rim/60" />
-        <div className="h-4 w-8 rounded bg-rim/60" />
+      <div className="flex gap-2 pt-3 border-t border-rim/60">
+        <div className="h-3 w-16 bg-rim/60" />
+        <div className="h-3 w-12 bg-rim/60" />
       </div>
     </div>
   );
@@ -173,14 +173,14 @@ export function NewsGrid({
         )}
         {isFetching && !isLoading && (
           <span className="ml-auto text-xs text-slate-500 flex items-center gap-1.5">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse_slow" />
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse_slow" />
             Refreshing…
           </span>
         )}
       </div>
 
-      {/* Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+      {/* Grid — narrower feed column now, so cap at 2 columns */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {isLoading &&
           Array.from({ length: limit }).map((_, i) => <SkeletonCard key={i} />)}
 

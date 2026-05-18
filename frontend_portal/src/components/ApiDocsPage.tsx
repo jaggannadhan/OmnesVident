@@ -476,7 +476,7 @@ export function ApiDocsPage() {
         {/* Top nav */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "24px" }}>
           <Link to="/" style={{ fontSize: "11px", color: "#94a3b8", textDecoration: "none", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            ← Back to globe
+            ← Back to feed
           </Link>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span style={{ fontSize: "10px", color: "#475569", fontFamily: "monospace", letterSpacing: "0.1em" }}>

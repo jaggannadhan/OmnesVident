@@ -5,7 +5,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Command-Center palette — driven by CSS variables so the values
+        // Intel-Terminal palette — driven by CSS variables so the values
         // swap between dark and light themes via the class on <html>.
         // See index.css for the bindings.
         base:        "var(--color-base)",
@@ -15,18 +15,24 @@ export default {
         "card-hover":"var(--color-card-hover)",
         rim:         "var(--color-rim)",
         "rim-bright":"var(--color-rim-bright)",
+        accent:      "var(--color-accent)",
+        "accent-ink":"var(--color-accent-ink)",
+        brand:       "rgb(var(--color-brand) / <alpha-value>)",
       },
       fontFamily: {
-        sans: ['"Inter"', "system-ui", "sans-serif"],
-        mono: ['"JetBrains Mono"', "monospace"],
+        sans:     ['"Inter"', "system-ui", "sans-serif"],
+        mono:     ['"JetBrains Mono"', "monospace"],
+        headline: ['"Newsreader"', "Georgia", "serif"],
       },
       animation: {
-        "fade-in": "fadeIn 0.2s ease-out",
+        "fade-in":  "fadeIn 0.2s ease-out",
         pulse_slow: "pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+        // `animate-blink` is defined in index.css to avoid a tailwind-config
+        // restart cycle when iterating on the timing.
       },
       keyframes: {
         fadeIn: {
-          "0%": { opacity: "0", transform: "translateY(4px)" },
+          "0%":   { opacity: "0", transform: "translateY(4px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
       },

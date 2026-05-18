@@ -10,27 +10,33 @@
 */
 :root,
 html.dark {
-  --color-base:        #06060f;
-  --color-surface:     #0d0d1a;
-  --color-panel:       #121228;
-  --color-card:        #181832;
-  --color-card-hover:  #1e1e3c;
-  --color-rim:         #2a2a50;
-  --color-rim-bright:  #3d3d6e;
-  --color-text:        #f1f5f9; /* slate-100 */
-  --color-scroll-track:#06060f;
+  --color-base:        #0A0A0A; /* background      */
+  --color-surface:     #131313; /* surface         */
+  --color-panel:       #1c1b1b; /* surface-low     */
+  --color-card:        #201f1f; /* surface-elev    */
+  --color-card-hover:  #2a2929;
+  --color-rim:         #353534; /* outline         */
+  --color-rim-bright:  #4a4a48;
+  --color-text:        #e5e2e1; /* on-background   */
+  --color-accent:      #EAB308; /* yellow-500      */
+  --color-accent-ink:  #0A0A0A; /* text on accent  */
+  --color-brand:       167 139 250; /* purple-400 / #a78bfa — matches the API docs page */
+  --color-scroll-track:#0A0A0A;
 }
 
 html.light {
-  --color-base:        #f8fafc; /* slate-50  */
+  --color-base:        #fafafa;
   --color-surface:     #ffffff;
-  --color-panel:       #f1f5f9; /* slate-100 */
+  --color-panel:       #f4f4f5; /* zinc-100        */
   --color-card:        #ffffff;
-  --color-card-hover:  #e2e8f0; /* slate-200 */
-  --color-rim:         #cbd5e1; /* slate-300 */
-  --color-rim-bright:  #94a3b8; /* slate-400 */
-  --color-text:        #0f172a; /* slate-900 */
-  --color-scroll-track:#f1f5f9;
+  --color-card-hover:  #e4e4e7; /* zinc-200        */
+  --color-rim:         #d4d4d8; /* zinc-300        */
+  --color-rim-bright:  #a1a1aa; /* zinc-400        */
+  --color-text:        #18181b; /* zinc-900        */
+  --color-accent:      #CA8A04; /* yellow-600 (darker for contrast on light) */
+  --color-accent-ink:  #ffffff;
+  --color-brand:       124 58 237; /* purple-600 / #7c3aed — darker for light-mode legibility */
+  --color-scroll-track:#f4f4f5;
 }
 
 @layer base {
@@ -115,7 +121,23 @@ html.light {
   }
 }
 
+/* Hard on/off blink — used by the SystemBriefing accent bar. Defined here
+   (rather than in tailwind.config.js) so HMR picks up timing tweaks without
+   a dev-server restart. Keep outside @layer so the @keyframes rule isn't
+   subject to PurgeCSS scoping. */
+@keyframes ov-blink {
+  0%, 49.999% { opacity: 1; }
+  50%, 100%   { opacity: 0; }
+}
+
 @layer utilities {
+  .animate-blink { animation: ov-blink 1s steps(1, end) infinite; }
+
+  /* Hide scrollbar on horizontally-overflowing strips (category nav, etc.)
+     while keeping the content scrollable on touch / wheel. */
+  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+
   /* VIBGYOR — one colour per news category. Keep in sync with
      visualizer/Marker.CATEGORY_COLORS and HudOverlay.CATEGORY_COLORS. */
   .text-category-world         { @apply text-violet-400; }  /* V  WORLD         */

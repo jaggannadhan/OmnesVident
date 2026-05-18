@@ -46,7 +46,7 @@ function formatRelativeTime(isoString: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// NewsCard component
+// NewsCard — magazine-style article tile.
 // ---------------------------------------------------------------------------
 
 interface NewsCardProps {
@@ -61,85 +61,96 @@ export function NewsCard({ story, onCategoryClick, onRegionClick }: NewsCardProp
   const hasAlternateSources = story.secondary_sources.length > 0;
 
   return (
-    <article className="group flex flex-col gap-3 rounded-xl bg-card border border-rim hover:border-rim-bright hover:bg-card-hover transition-all duration-200 p-4 animate-fade-in">
+    <article className="group flex flex-col gap-3 p-6 border border-rim hover:bg-card-hover transition-colors animate-fade-in">
 
-      {/* Header: Source name + timestamp */}
-      <div className="flex items-center justify-between gap-2 min-w-0">
-        <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest truncate">
+      {/* Top meta row: category pill + region (left) · source (right) */}
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => onCategoryClick?.(story.category)}
+            className="font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 shrink-0 hover:opacity-80 transition-opacity"
+            style={{ background: "var(--color-text)", color: "var(--color-base)" }}
+            title={`Filter by ${meta.label}`}
+          >
+            {meta.label}
+          </button>
+          <button
+            onClick={() => onRegionClick?.(story.region_code)}
+            className="font-mono text-[10px] uppercase tracking-widest truncate hover:text-accent transition-colors"
+            style={{ color: "var(--color-text)", opacity: 0.6 }}
+            title={`View ${regionLabel(story.region_code)} news`}
+          >
+            {regionLabel(story.region_code)}
+          </button>
+        </div>
+        <span
+          className="font-mono text-[10px] uppercase tracking-wider shrink-0 truncate max-w-[40%]"
+          style={{ color: "var(--color-text)", opacity: 0.45 }}
+          title={story.source_name}
+        >
           {story.source_name}
         </span>
-        <time
-          dateTime={story.timestamp}
-          className="text-xs text-slate-500 shrink-0 font-mono"
-        >
-          {formatRelativeTime(story.timestamp)}
-        </time>
       </div>
 
-      {/* Title — primary action link */}
+      {/* Headline — serif, the visual centerpiece */}
       <a
         href={story.source_url}
         target="_blank"
         rel="noopener noreferrer"
-        className="group/link flex items-start gap-2 text-slate-100 hover:text-white"
+        className="group/link flex items-start gap-2"
         aria-label={`Read full article: ${story.title} (opens in new tab)`}
       >
-        <h2 className="text-sm font-semibold leading-snug line-clamp-3 flex-1">
+        <h2
+          className="font-headline text-xl leading-tight flex-1 group-hover:text-accent group-hover/link:text-accent transition-colors"
+          style={{ color: "var(--color-text)" }}
+        >
           {story.title}
         </h2>
-        <ExternalLinkIcon className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-500 group-hover/link:text-slate-300 transition-colors" />
+        <ExternalLinkIcon
+          className="w-3.5 h-3.5 shrink-0 mt-1.5 opacity-40 group-hover/link:opacity-100 transition-opacity"
+        />
       </a>
 
       {/* Snippet */}
-      <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">
-        {story.snippet}
-      </p>
-
-      {/* Footer: Category + Regions + Secondary sources */}
-      <div className="flex flex-wrap items-center gap-1.5 mt-auto pt-1 border-t border-rim/50">
-
-        {/* Category badge */}
-        <button
-          onClick={() => onCategoryClick?.(story.category)}
-          className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ring-1 ${meta.bgClass} ${meta.colorClass} transition-opacity hover:opacity-80`}
-          title={`Filter by ${meta.label}`}
+      {story.snippet && (
+        <p
+          className="font-sans text-[13px] leading-relaxed line-clamp-2"
+          style={{ color: "var(--color-text)", opacity: 0.7 }}
         >
-          <span aria-hidden="true">{meta.icon}</span>
-          {meta.label}
-        </button>
+          {story.snippet}
+        </p>
+      )}
 
-        {/* Primary region badge */}
-        <button
-          onClick={() => onRegionClick?.(story.region_code)}
-          className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded ring-1 bg-slate-700/40 ring-slate-600/40 text-slate-300 hover:bg-slate-600/40 transition-colors"
-          title={`View ${regionLabel(story.region_code)} news`}
+      {/* Footer: timestamp + cross-regional tags + secondary sources */}
+      <div className="flex flex-wrap items-center gap-3 mt-auto pt-3 border-t border-rim/60">
+        <time
+          dateTime={story.timestamp}
+          className="font-mono text-[10px] uppercase tracking-wider"
+          style={{ color: "var(--color-text)", opacity: 0.55 }}
         >
-          {regionLabel(story.region_code)}
-        </button>
+          {formatRelativeTime(story.timestamp)}
+        </time>
 
-        {/* Cross-regional tags (beyond primary) */}
         {story.mentioned_regions
           .filter((r) => r !== story.region_code)
-          .slice(0, 3)
+          .slice(0, 2)
           .map((r) => (
             <button
               key={r}
               onClick={() => onRegionClick?.(r)}
-              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded ring-1 bg-slate-800/40 ring-slate-700/30 text-slate-500 hover:text-slate-300 hover:bg-slate-700/40 transition-colors"
+              className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-rim/70 hover:border-accent hover:text-accent transition-colors"
+              style={{ color: "var(--color-text)", opacity: 0.55 }}
               title={`Also relevant to ${regionLabel(r)}`}
             >
               {regionLabel(r)}
             </button>
           ))}
 
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Secondary sources toggle */}
         {hasAlternateSources && (
           <button
             onClick={() => setSourcesOpen((p) => !p)}
-            className="inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-300 transition-colors ml-auto"
+            className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider ml-auto hover:text-accent transition-colors"
+            style={{ color: "var(--color-text)", opacity: 0.55 }}
             aria-expanded={sourcesOpen}
             aria-controls={`sources-${story.dedup_group_id}`}
           >
@@ -149,11 +160,11 @@ export function NewsCard({ story, onCategoryClick, onRegionClick }: NewsCardProp
         )}
       </div>
 
-      {/* Secondary sources list */}
+      {/* Secondary sources list — collapsible */}
       {hasAlternateSources && sourcesOpen && (
         <ul
           id={`sources-${story.dedup_group_id}`}
-          className="flex flex-col gap-1 pt-1 border-t border-rim/50 animate-fade-in"
+          className="flex flex-col gap-1 pt-2 border-t border-rim/60 animate-fade-in"
         >
           {story.secondary_sources.map((url) => {
             let displayUrl: string;
@@ -165,7 +176,8 @@ export function NewsCard({ story, onCategoryClick, onRegionClick }: NewsCardProp
                   href={url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
+                  className="inline-flex items-center gap-1.5 font-mono text-[11px] hover:text-accent transition-colors"
+                  style={{ color: "var(--color-text)", opacity: 0.7 }}
                 >
                   <ExternalLinkIcon className="w-3 h-3 shrink-0" />
                   <span className="truncate">{displayUrl}</span>
